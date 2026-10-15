@@ -30,15 +30,17 @@ log = logging.getLogger("dashboard")
 settings = get_settings()
 setup_logging(settings.log_level)
 
-BASE = Path(__file__).parent
+BASE_DIR = Path(__file__).parent
+BASE = "/" + settings.dashboard_base_path.strip("/") if settings.dashboard_base_path.strip("/") else ""
 CONFIGURED = bool(settings.dashboard_password_hash and settings.dashboard_secret_key and settings.dashboard_db_password)
 PAGE_SIZE = 25
 RANGES = (7, 14, 30, 60, 90)
 
 app = FastAPI(title="Usage dashboard", docs_url=None, redoc_url=None, openapi_url=None)
-templates = Jinja2Templates(directory=str(BASE / "templates"))
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 for name in ("fa_num", "fa_pct", "fa_usd", "fa_ms", "fa_date", "fa_dt", "short_day"):
     templates.env.filters[name] = getattr(fmt, name)
+templates.env.globals["base"] = BASE
 throttle = LoginThrottle()
 
 _SessionLocal: sessionmaker | None = None
@@ -71,7 +73,7 @@ Auth = Depends(require_login)
 async def _not_authenticated(request: Request, exc: NotAuthenticated):
     if request.url.path.endswith(".csv"):
         return PlainTextResponse("Sign in required.", status_code=401)
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(f"{BASE}/login", status_code=303)
 
 
 @app.exception_handler(Exception)
@@ -106,11 +108,12 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=settings.dashboard_secret_key or "unconfigured",
     session_cookie="dash_session",
+    path=BASE or "/",  # under a sub-path the cookie is not sent to the rest of the site
     max_age=8 * 3600,
     same_site="strict",
     https_only=settings.dashboard_cookie_secure,
 )
-app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
@@ -132,7 +135,7 @@ def healthz() -> dict[str, str]:
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     if request.session.get("auth"):
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"{BASE}/" if BASE else "/", status_code=303)
     return page(request, "login.html", error=None)
 
 
@@ -147,7 +150,7 @@ def login(request: Request, password: str = Form(..., max_length=200)):
         request.session.clear()
         request.session["auth"] = True
         log.info("Dashboard login", extra={"client": key})
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"{BASE}/" if BASE else "/", status_code=303)
     throttle.failure(key)
     log.warning("Dashboard login failed", extra={"client": key})
     return page(request, "login.html", 401, error="رمز عبور نادرست است.")
@@ -156,7 +159,7 @@ def login(request: Request, password: str = Form(..., max_length=200)):
 @app.post("/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(f"{BASE}/login", status_code=303)
 
 
 # ---------------------------------------------------------------- pages

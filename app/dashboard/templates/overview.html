@@ -9,7 +9,7 @@
 {% endif %}
 
 <div class="range" aria-label="بازهٔ زمانی">
-  {% for r in ranges %}<a href="/?days={{ r }}" class="{{ 'active' if r == ov.days }}">{{ r|fa_num }} روز</a>{% endfor %}
+  {% for r in ranges %}<a href="{{ base }}/?days={{ r }}" class="{{ 'active' if r == ov.days }}">{{ r|fa_num }} روز</a>{% endfor %}
 </div>
 
 <section class="grid budgets" aria-label="بودجه توکن">
@@ -89,7 +89,7 @@
     <tbody>
     {% for r in ov.expensive %}
       <tr>
-        <td><a href="/runs/{{ r.id }}" class="num">{{ r.id|fa_num }}</a></td><td>{{ r.created_at|fa_dt }}</td>
+        <td><a href="{{ base }}/runs/{{ r.id }}" class="num">{{ r.id|fa_num }}</a></td><td>{{ r.created_at|fa_dt }}</td>
         <td class="ltr">{{ r.model }}</td><td>{{ r.intent }}</td><td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
         <td class="num">{{ r.tokens|fa_num }}</td><td class="num">{{ r.cost|fa_usd }}</td>
       </tr>
@@ -107,6 +107,6 @@
 <script id="chart-data" type="application/json">{{ chart_data|tojson }}</script>
 {% endblock %}
 {% block scripts %}
-<script src="/static/chart.umd.js"></script>
-<script src="/static/app.js"></script>
+<script src="{{ base }}/static/chart.umd.js"></script>
+<script src="{{ base }}/static/app.js"></script>
 {% endblock %}

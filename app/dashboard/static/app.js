@@ -78,7 +78,7 @@
       indexAxis: 'y',
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return '$' + Number(c.parsed.x).toLocaleString('fa-IR', { maximumFractionDigits: 4 }) + ' · ' + d.expensive[c.dataIndex].model; } } } },
       scales: { x: { beginAtZero: true, ticks: { callback: function (v) { return '$' + Number(v).toLocaleString('fa-IR'); } } }, y: { grid: { display: false } } },
-      onClick: function (evt, els) { if (els.length) window.location = '/runs/' + d.expensive[els[0].index].id; }
+      onClick: function (evt, els) { if (els.length) window.location = (document.body.getAttribute('data-base') || '') + '/runs/' + d.expensive[els[0].index].id; }
     }
   });
 })();

@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     dashboard_cookie_secure: bool = False  # true behind HTTPS
     dashboard_host: str = "localhost"
     dashboard_port: int = 8080
+    # Serve under a sub-path, e.g. "/dashboard" for https://example.com/dashboard (the reverse proxy
+    # must strip the prefix). Empty = served at the root of its own host name.
+    dashboard_base_path: str = ""
 
     google_client_id: str = ""
     google_client_secret: str = ""

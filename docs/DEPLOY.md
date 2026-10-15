@@ -182,6 +182,8 @@ TELEGRAM_API_BASE_URL=https://tg.example.com
 
 Check from the server before going on: `curl -s https://tg.example.com/bot<YOUR_TOKEN>/getMe` must return `{"ok":true,...}`. Anyone without the token gets a 404. Cloudflare can technically see the traffic, so only use an account you control.
 
+**Under a path of a site already on Cloudflare** (for example `https://example.com/tg`): in the Worker add a *Route* `example.com/tg/*` instead of a custom domain, add the plain variable `PATH_PREFIX` = `/tg`, and set `TELEGRAM_API_BASE_URL=https://example.com/tg`. This only works if the site is proxied by Cloudflare (orange cloud) so that requests never reach your own server. A `/tg` location in your own nginx does **not** work: it would call Telegram from the same blocked server.
+
 Alternative: an HTTP(S) or SOCKS5 proxy, `TELEGRAM_PROXY_URL=http://user:pass@proxy-host:3128` or `socks5://proxy-host:1080`.
 
 **DeepSeek blocked.** Same idea: a gateway that forwards to `https://api.deepseek.com`, then `DEEPSEEK_BASE_URL=https://relay2.example.com`. Or use the general proxy below.
@@ -373,6 +375,8 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo apt-get install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d usage.example.com
 ```
+
+**Dashboard under a path of a site you already serve** (for example `https://example.com/dashboard`, no new DNS record or certificate): set `DASHBOARD_BASE_PATH=/dashboard` in `.env` (and `DASHBOARD_HOST=example.com`), skip the vhost and certbot above, and paste the two `location` blocks from `deploy/nginx-dashboard-subpath.conf` into the existing `server { ... }` block of that site, then `sudo nginx -t && sudo systemctl reload nginx`. The dashboard then lives at `https://example.com/dashboard/`, and its session cookie is limited to that path so it is never sent to the rest of your site. Make sure nothing else already uses `/dashboard` there.
 
 The dashboard container publishes only `127.0.0.1:DASHBOARD_PORT`, so it is never reachable except through your nginx. The rest (sections 7 onward) is identical; ignore the Caddy lines.
 

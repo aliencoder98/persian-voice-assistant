@@ -2,6 +2,7 @@ import csv
 import datetime as dt
 import io
 import json
+import os
 import re
 
 import pytest
@@ -261,3 +262,62 @@ def test_persian_formatting():
 def test_csv_safe():
     assert fmt.csv_safe("=1+1") == "'=1+1" and fmt.csv_safe("@x") == "'@x" and fmt.csv_safe("ok") == "ok"
     assert fmt.csv_safe(None) == "" and fmt.csv_safe("-5") == "'-5"
+
+
+# ---------------- served under a sub-path (https://example.com/dashboard)
+
+
+@pytest.fixture
+def subpath(client, monkeypatch):
+    monkeypatch.setattr(dash, "BASE", "/dashboard")
+    monkeypatch.setitem(dash.templates.env.globals, "base", "/dashboard")
+    return client
+
+
+def test_subpath_redirects_and_links_keep_the_prefix(subpath, session, user):
+    assert subpath.get("/").headers["location"] == "/dashboard/login"
+    assert subpath.get("/logs.csv").status_code == 401
+    r = subpath.post("/login", data={"password": PASSWORD})
+    assert r.status_code == 303 and r.headers["location"] == "/dashboard/"
+    mk_run(session, user)
+    for path in ["/", "/logs", "/logs?status=failed"]:
+        html = subpath.get(path).text
+        links = re.findall(r'(?:href|action|src)="(/[^"]*)"', html)
+        assert links and all(l.startswith("/dashboard/") for l in links), (path, [l for l in links if not l.startswith("/dashboard/")])
+        assert 'data-base="/dashboard"' in html
+    run_id = session.scalars(__import__("sqlalchemy").select(AgentRun.id).order_by(AgentRun.id.desc())).first()
+    html = subpath.get(f"/runs/{run_id}").text
+    assert 'href="/dashboard/logs"' in html
+    assert subpath.post("/logout").headers["location"] == "/dashboard/login"
+
+
+def test_subpath_login_page_posts_to_the_prefixed_url(subpath):
+    html = subpath.get("/login").text
+    assert 'action="/dashboard/login"' in html and 'href="/dashboard/static/app.css"' in html
+
+
+def test_subpath_cookie_is_scoped_to_the_prefix():
+    """The session cookie must not be sent to the rest of the site (checked in a fresh interpreter)."""
+    import subprocess
+    import sys
+
+    code = (
+        "from fastapi.testclient import TestClient\n"
+        "from app.dashboard import main as d\n"
+        "c = TestClient(d.app, follow_redirects=False)\n"
+        "r = c.post('/login', data={'password': 'correct horse battery'})\n"
+        "print(r.status_code, r.headers.get('set-cookie', '').lower())\n"
+    )
+    env = {**os.environ, "DASHBOARD_BASE_PATH": "/dashboard", "DASHBOARD_SECRET_KEY": "k" * 40,
+           "DASHBOARD_DB_PASSWORD": "x", "DASHBOARD_PASSWORD_HASH": hash_password(PASSWORD, iterations=1000)}  # fmt: skip
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, check=True).stdout.strip().splitlines()[-1]
+    assert out.startswith("303") and "path=/dashboard;" in out and "httponly" in out
+
+
+def test_base_path_is_normalised():
+    from app.config import Settings
+
+    for raw, expected in [("dashboard", "/dashboard"), ("/dashboard/", "/dashboard"), ("", ""), ("/", "")]:
+        base = "/" + raw.strip("/") if raw.strip("/") else ""
+        assert base == expected
+    assert Settings(dashboard_base_path="/x").dashboard_base_path == "/x"

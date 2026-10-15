@@ -3,7 +3,7 @@
 {% block title %}درخواست {{ d.run.id|fa_num }}{% endblock %}
 {% block content %}
 {% set r = d.run %}
-<p><a href="/logs">← بازگشت به لاگ‌ها</a></p>
+<p><a href="{{ base }}/logs">← بازگشت به لاگ‌ها</a></p>
 <h1>درخواست <span class="num">{{ r.id|fa_num }}</span> <span class="pill {{ r.status.value }}">{{ r.status.value }}</span></h1>
 
 <div class="stack">
