@@ -43,3 +43,4 @@ scripts/backup.conf
 
 # Local transfer artifacts
 *.bundle
+deploy-artifacts/
