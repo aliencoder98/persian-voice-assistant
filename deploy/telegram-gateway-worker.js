@@ -19,12 +19,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const prefix = env.PATH_PREFIX || "";
-    const path = prefix && url.pathname.startsWith(prefix + "/") ? url.pathname.slice(prefix.length) : url.pathname;
+    // python-telegram-bot percent-encodes file URLs (the ":" in the token becomes "%3A"): compare the decoded path.
+    let decoded;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch (e) {
+      return new Response("Not found", { status: 404 });
+    }
+    const path = prefix && decoded.startsWith(prefix + "/") ? decoded.slice(prefix.length) : decoded;
     const allowed = [`/bot${env.BOT_TOKEN}/`, `/file/bot${env.BOT_TOKEN}/`];
     if (!env.BOT_TOKEN || !allowed.some((p) => path.startsWith(p))) {
       return new Response("Not found", { status: 404 });
     }
-    const target = new URL(path + url.search, "https://api.telegram.org");
+    const target = new URL(path + url.search, "https://api.telegram.org");  // Telegram accepts the plain form
     return fetch(new Request(target, request));
   },
 };
