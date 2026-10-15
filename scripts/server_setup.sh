@@ -53,10 +53,11 @@ else
     echo "download.docker.com unreachable: using Ubuntu's own packages"
     apt-get install -y -qq docker.io docker-compose-v2 >/dev/null
   fi
-  if [ ! -f /etc/docker/daemon.json ]; then
-    mkdir -p /etc/docker
-    echo '{"dns":["1.1.1.1","8.8.8.8"],"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"5"}}' > /etc/docker/daemon.json
-    systemctl restart docker
+  # Containers must use the server's own resolvers: public ones (1.1.1.1, 8.8.8.8) are blocked on some networks.
+  if [ -f "$(dirname "${BASH_SOURCE[0]:-$0}")/fix_docker_dns.sh" ]; then
+    bash "$(dirname "${BASH_SOURCE[0]:-$0}")/fix_docker_dns.sh" || echo "WARNING: could not set Docker DNS; see docs/DEPLOY.md"
+  else
+    curl -fsSL "$RAW/scripts/fix_docker_dns.sh" | bash || echo "WARNING: could not set Docker DNS; see docs/DEPLOY.md"
   fi
 fi
 usermod -aG docker deploy

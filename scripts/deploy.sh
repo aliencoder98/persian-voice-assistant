@@ -6,6 +6,7 @@
 #   scripts/deploy.sh rollback     # go back to the previously deployed commit
 #   scripts/deploy.sh status       # what is deployed, container health
 #   scripts/deploy.sh --no-pull    # deploy the working tree as it is (first install, or no git remote)
+#   scripts/deploy.sh --no-build   # use images you loaded with `docker load` (tag "prod"); no build, no pulls
 #
 # Run it from the project directory as the deploy user (not root).
 set -euo pipefail
@@ -69,11 +70,19 @@ wait_healthy() {
 
 bring_up() {
   local sha="$1"
-  APP_TAG="$sha"
-  log "building image persian-assistant:$APP_TAG..."
-  compose build
-  log "applying migrations and starting services..."
-  compose up -d --remove-orphans
+  if [ "${NO_BUILD:-0}" = "1" ]; then
+    APP_TAG="${APP_TAG:-prod}"
+    docker image inspect "persian-assistant:$APP_TAG" >/dev/null 2>&1 || die "image persian-assistant:$APP_TAG is not loaded (docker load < ...)"
+    log "using the preloaded image persian-assistant:$APP_TAG (no build)"
+    log "applying migrations and starting services..."
+    compose up -d --no-build --remove-orphans
+  else
+    APP_TAG="$sha"
+    log "building image persian-assistant:$APP_TAG..."
+    compose build
+    log "applying migrations and starting services..."
+    compose up -d --remove-orphans
+  fi
   wait_healthy
 }
 
@@ -94,8 +103,9 @@ case "$cmd" in
     compose ps
     ;;
 
-  update|--no-pull)
+  update|--no-pull|--no-build)
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "tracked files were modified on the server; commit or revert them first"
+    [ "$cmd" = "--no-build" ] && NO_BUILD=1
     if [ "$cmd" = "update" ]; then
       if git remote | grep -q .; then
         log "git pull --ff-only"
