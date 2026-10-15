@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     google_calendar_id: str = "primary"
 
     log_level: str = "INFO"
+    debug: bool = False  # exposes the OpenAPI docs; keep off in production
+
+    admin_api_key: str = ""  # header X-Admin-Key; admin endpoints are disabled while empty
+    max_voice_seconds: int = 60
+    rate_limit_per_minute: int = 10  # messages per Telegram user
+    audio_max_age_s: int = 3600  # leftover audio older than this is deleted
+    telegram_proxy_url: str = ""  # optional HTTPS/SOCKS proxy for api.telegram.org
+    mcp_port: int = 8765
+    mcp_owner_telegram_id: int = 0  # 0 = first ALLOWED_USER_IDS entry
 
     # Google "Desktop app" client file (downloaded from Cloud Console); used when the
     # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET variables are empty.

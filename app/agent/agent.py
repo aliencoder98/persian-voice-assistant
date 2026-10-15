@@ -15,6 +15,7 @@ from app.agent.llm import LLMError, LLMProvider
 from app.agent.prompt import PROMPT_VERSION, SYSTEM_PROMPT
 from app.agent.schemas import Action, Clarification, EmailAction, ScheduleAction
 from app.db.models import AgentRun, Intent, RunStatus, User
+from app.logging_config import bind_run_id
 from app.tools import impl as _tool_implementations  # noqa: F401  (registers the tools)
 from app.tools.registry import (
     ToolContext,
@@ -219,7 +220,8 @@ def process_message(
     ctx.known_emails |= {c["email"].lower() for c in agent_ctx.contacts if c.get("email")}
     started = time.perf_counter()
     try:
-        outcome = run_agent(provider, ctx, text, agent_ctx)
+        with bind_run_id(run.id):
+            outcome = run_agent(provider, ctx, text, agent_ctx)
     except LLMError as exc:
         outcome = AgentOutcome(kind="failed", error=str(exc))
     except Exception as exc:

@@ -3,11 +3,12 @@
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.agent.schemas import EmailAction, ScheduleAction
-from app.db.models import AgentRun, AuditEvent, CalendarEvent, Email, Intent, RunStatus, User
+from app.db.models import AgentRun, AuditEvent, CalendarEvent, Email, Intent, RunStatus, ToolCall, User
+from app.logging_config import bind_run_id
 from app.tools import impl as _tool_implementations  # noqa: F401  (registers the tools)
 from app.tools.registry import ToolContext, run_tool, tehran_now
 from app.util.persian import jalali_long_fa, to_fa_digits
@@ -24,14 +25,20 @@ class ExecResult:
     message: str
 
 
-def _claim(session: Session, run_id: int, user_id: int, to: RunStatus) -> AgentRun | None:
-    """Atomically move a run out of pending_confirmation. Exactly one caller can win."""
+def _claim(
+    session: Session,
+    run_id: int,
+    user_id: int,
+    to: RunStatus,
+    frm: RunStatus = RunStatus.pending_confirmation,
+) -> AgentRun | None:
+    """Atomically move a run out of `frm` (pending_confirmation by default). Exactly one caller wins."""
     won = session.execute(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
             AgentRun.user_id == user_id,
-            AgentRun.status == RunStatus.pending_confirmation,
+            AgentRun.status == frm,
         )
         .values(status=to)
     ).rowcount
@@ -65,11 +72,35 @@ def supersede_run(session: Session, user: User, run_id: int) -> None:
         _audit(session, "action_superseded", user, run)
 
 
-def confirm_run(session: Session, user: User, run_id: int, *, now=tehran_now) -> ExecResult:
-    run = _claim(session, run_id, user.id, RunStatus.confirmed)
+def confirm_run(
+    session: Session, user: User, run_id: int, *, now=tehran_now, retry: bool = False
+) -> ExecResult:
+    """Run the confirmed action. With retry=True, re-run a run that failed *during execution*:
+    the owner confirmed it already, and the provider-side idempotency keys prevent duplicates."""
+    run = _claim(
+        session,
+        run_id,
+        user.id,
+        RunStatus.confirmed,
+        RunStatus.failed if retry else RunStatus.pending_confirmation,
+    )
     if run is None:
         return ExecResult(False, ALREADY_HANDLED)
-    _audit(session, "action_confirmed", user, run)
+    with bind_run_id(run.id):
+        return _confirmed(session, user, run, now, retry)
+
+
+def _confirmed(session: Session, user: User, run: AgentRun, now, retry: bool) -> ExecResult:
+    _audit(session, "action_retried" if retry else "action_confirmed", user, run)
+    if retry:  # free the keys of failed attempts so the tool runs again (providers dedupe)
+        session.execute(
+            delete(ToolCall).where(
+                ToolCall.run_id == run.id,
+                ToolCall.idempotency_key.is_not(None),
+                ToolCall.status.in_(["error", "running"]),
+            )
+        )
+        session.commit()
 
     ctx = ToolContext(session=session, user=user, run_id=run.id, now=now)
     try:
@@ -80,7 +111,7 @@ def confirm_run(session: Session, user: User, run_id: int, *, now=tehran_now) ->
         else:
             raise ValueError(f"run {run.id} has no executable intent")
     except Exception as exc:
-        log.exception("Execution failed for run %s", run.id)
+        log.exception("Execution failed")
         run.status, run.error = RunStatus.failed, f"{type(exc).__name__}: {exc}"
         session.commit()
         _audit(session, "action_failed", user, run, {"error": run.error[:300]})
@@ -95,7 +126,7 @@ def confirm_run(session: Session, user: User, run_id: int, *, now=tehran_now) ->
 
         learn_from_executed(session, ctx, run)
     except Exception:
-        log.exception("Memory update failed for run %s", run.id)
+        log.exception("Memory update failed")
         session.rollback()
     return result
 

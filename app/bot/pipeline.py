@@ -56,26 +56,39 @@ def analyse(
 ) -> Reply:
     with SessionLocal() as session:
         user = get_or_create_user(session, tg_user)
-        draft = None
-        if editing_run_id is not None:
-            old = session.get(AgentRun, editing_run_id)
-            if old and old.user_id == user.id and old.status == RunStatus.pending_confirmation:
-                draft = old.action_json
-
-        try:
-            provider = get_provider()
-        except LLMError:
-            return Reply("failed")
-        agent_ctx = build_context(session, user, text, draft)
-        run, outcome = process_message(
-            session, provider, user, text, agent_ctx, voice_message_id=voice_message_id
+        return analyse_for_user(
+            session, user, text, voice_message_id=voice_message_id, editing_run_id=editing_run_id
         )
 
-        if outcome.kind in ("schedule", "email"):
-            if draft is not None:
-                supersede_run(session, user, editing_run_id)
-            action = ScheduleAction if outcome.kind == "schedule" else EmailAction
-            return Reply(outcome.kind, run.id, action=action.model_validate(run.action_json))
-        if outcome.kind == "clarify":
-            return Reply("clarify", run.id, text=outcome.question)
-        return Reply("failed", run.id)
+
+def analyse_for_user(
+    session,
+    user: User,
+    text: str,
+    *,
+    voice_message_id: int | None = None,
+    editing_run_id: int | None = None,
+) -> Reply:
+    draft = None
+    if editing_run_id is not None:
+        old = session.get(AgentRun, editing_run_id)
+        if old and old.user_id == user.id and old.status == RunStatus.pending_confirmation:
+            draft = old.action_json
+
+    try:
+        provider = get_provider()
+    except LLMError:
+        return Reply("failed")
+    agent_ctx = build_context(session, user, text, draft)
+    run, outcome = process_message(
+        session, provider, user, text, agent_ctx, voice_message_id=voice_message_id
+    )
+
+    if outcome.kind in ("schedule", "email"):
+        if draft is not None:
+            supersede_run(session, user, editing_run_id)
+        action = ScheduleAction if outcome.kind == "schedule" else EmailAction
+        return Reply(outcome.kind, run.id, action=action.model_validate(run.action_json))
+    if outcome.kind == "clarify":
+        return Reply("clarify", run.id, text=outcome.question)
+    return Reply("failed", run.id)

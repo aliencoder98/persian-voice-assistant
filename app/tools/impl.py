@@ -2,6 +2,7 @@
 
 import datetime as dt
 import hashlib
+import uuid
 from typing import Annotated
 
 from pydantic import BaseModel, EmailStr, Field
@@ -188,7 +189,8 @@ def event_id_for(key: str) -> str:
 
 
 def create_calendar_event(ctx: ToolContext, args: CreateEventArgs) -> dict:
-    key = f"run:{ctx.run_id}:create_calendar_event"
+    # Outside an agent run (e.g. the MCP server) there is no run id: use a fresh unique id.
+    key = f"run:{ctx.run_id}:create_calendar_event" if ctx.run_id else f"adhoc:{uuid.uuid4()}"
     return calendar().create_event(
         date=args.date,
         time_=args.time,
@@ -201,9 +203,8 @@ def create_calendar_event(ctx: ToolContext, args: CreateEventArgs) -> dict:
 
 
 def send_email(ctx: ToolContext, args: SendEmailArgs) -> dict:
-    message_id = resend_send(
-        str(args.to), args.subject, args.body, idempotency_key=f"run-{ctx.run_id}-send_email"
-    )
+    key = f"run-{ctx.run_id}-send_email" if ctx.run_id else None
+    message_id = resend_send(str(args.to), args.subject, args.body, idempotency_key=key)
     return {"provider_message_id": message_id}
 
 
