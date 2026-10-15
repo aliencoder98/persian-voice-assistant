@@ -100,19 +100,20 @@ EOF
   else
     curl -fsSL "$RAW/scripts/nginx_include.py" -o /tmp/nginx_include.py
   fi
+  BK=/var/backups/assistant-nginx
   set +e
-  python3 /tmp/nginx_include.py --domain "$DOMAIN" --include "snippets/assistant-dashboard.conf"
+  out="$(python3 /tmp/nginx_include.py --domain "$DOMAIN" --include "snippets/assistant-dashboard.conf" --backup-dir "$BK")"
   rc=$?
   set -e
+  echo "$out"
+  edited="$(echo "$out" | sed -n 's/^added: //p')"
   if [ $rc -eq 0 ]; then
     if nginx -t; then
       systemctl reload nginx
       echo "nginx reloaded."
     else
       echo "nginx -t FAILED: restoring the backed-up file"
-      for b in /etc/nginx/sites-enabled/*.bak-assistant /etc/nginx/conf.d/*.bak-assistant; do
-        [ -f "$b" ] && cp -f "$b" "${b%.bak-assistant}" && rm -f "$b"
-      done
+      [ -n "$edited" ] && cp -f "$BK/$(basename "$edited").bak" "$edited"
       nginx -t && systemctl reload nginx
       exit 1
     fi

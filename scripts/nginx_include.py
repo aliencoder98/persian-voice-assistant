@@ -4,7 +4,8 @@
     python3 nginx_include.py --domain didrah.com --include "snippets/assistant-dashboard.conf" [--dirs /etc/nginx/sites-enabled /etc/nginx/conf.d]
 
 Exit codes: 0 = added or already present, 2 = no matching HTTPS server block, 3 = several matches (nothing changed).
-The file is backed up first (FILE.bak-assistant). The caller must still run `nginx -t` and restore the backup on failure.
+The file is backed up first, OUTSIDE the nginx directories (nginx would load a backup left in sites-enabled):
+--backup-dir/NAME.bak. The caller must still run `nginx -t` and restore that backup on failure.
 """
 
 import argparse
@@ -14,6 +15,7 @@ import shutil
 import sys
 
 DEFAULT_DIRS = ["/etc/nginx/sites-enabled", "/etc/nginx/conf.d"]
+DEFAULT_BACKUP_DIR = "/var/backups/assistant-nginx"
 
 
 def mask_comments(text: str) -> str:
@@ -45,7 +47,7 @@ def matches(block: str, domain: str) -> bool:
     return domain in names and re.search(r"\blisten\s+[^;]*\b443\b", masked) is not None
 
 
-def add_include(path: pathlib.Path, domain: str, include: str) -> str:
+def add_include(path: pathlib.Path, domain: str, include: str, backup_dir: pathlib.Path) -> str:
     """Returns 'added', 'present' or 'nomatch' for one file."""
     text = path.read_text(encoding="utf-8")
     hits = [(s, e) for s, e in server_blocks(text) if matches(text[s : e + 1], domain)]
@@ -56,7 +58,8 @@ def add_include(path: pathlib.Path, domain: str, include: str) -> str:
     start, end = hits[0]
     if include in text[start : end + 1]:
         return "present"
-    shutil.copy2(path, str(path) + ".bak-assistant")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, backup_dir / (path.name + ".bak"))
     line = f"\n    include {include};  # added by the assistant's server_setup.sh\n"
     path.write_text(text[:end] + line + text[end:], encoding="utf-8")
     return "added"
@@ -67,9 +70,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--domain", required=True)
     ap.add_argument("--include", required=True)
     ap.add_argument("--dirs", nargs="*", default=DEFAULT_DIRS)
+    ap.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR)
     args = ap.parse_args(argv)
 
-    files = [p for d in args.dirs for p in sorted(pathlib.Path(d).glob("*")) if p.is_file() and not p.name.endswith((".bak-assistant", "~"))]
+    files = [p for d in args.dirs for p in sorted(pathlib.Path(d).glob("*")) if p.is_file() and not p.name.endswith((".bak-assistant", ".bak", "~"))]
     candidates = []
     for f in files:
         try:
@@ -86,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         print("several HTTPS server blocks match; edit by hand: " + ", ".join(str(f) for f, _ in candidates))
         return 3
     f = candidates[0][0]
-    result = add_include(f, args.domain, args.include)
+    result = add_include(f, args.domain, args.include, pathlib.Path(args.backup_dir))
     print(f"{result}: {f}")
     return 0 if result in ("added", "present") else 2
 

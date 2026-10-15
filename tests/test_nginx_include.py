@@ -48,7 +48,7 @@ def run(tmp_path, files, domain="didrah.com"):
     d.mkdir(exist_ok=True)
     for name, text in files.items():
         (d / name).write_text(text, encoding="utf-8")
-    return ni.main(["--domain", domain, "--include", INCLUDE, "--dirs", str(d)]), d
+    return ni.main(["--domain", domain, "--include", INCLUDE, "--dirs", str(d), "--backup-dir", str(tmp_path / "bk")]), d
 
 
 def test_include_goes_into_the_https_block_only(tmp_path):
@@ -61,7 +61,8 @@ def test_include_goes_into_the_https_block_only(tmp_path):
     assert f"include {INCLUDE};" not in text[: text.index("listen 443")]  # not in the port-80 redirect block
     assert text.count("{") == text.count("}")
     assert "try_files $uri $uri/ /index.html;" in text and "ssl_certificate" in text
-    assert (d / "didrah.bak-assistant").read_text(encoding="utf-8") == SITE
+    assert (tmp_path / "bk" / "didrah.bak").read_text(encoding="utf-8") == SITE
+    assert not list(d.glob("*.bak*"))  # nginx must never find a backup in its own directories
     assert (d / "other").read_text(encoding="utf-8") == OTHER  # untouched
 
 
@@ -75,7 +76,7 @@ def test_running_twice_changes_nothing_the_second_time(tmp_path):
     run(tmp_path, {"didrah": SITE})
     d = tmp_path / "sites"
     after_first = (d / "didrah").read_text(encoding="utf-8")
-    rc, _ = run(tmp_path, {}) if False else (ni.main(["--domain", "didrah.com", "--include", INCLUDE, "--dirs", str(d)]), d)
+    rc = ni.main(["--domain", "didrah.com", "--include", INCLUDE, "--dirs", str(d), "--backup-dir", str(tmp_path / "bk")])
     assert rc == 0 and (d / "didrah").read_text(encoding="utf-8") == after_first
 
 
@@ -99,11 +100,11 @@ def test_http_only_block_is_not_enough(tmp_path):
 def test_two_matching_files_are_left_alone(tmp_path):
     rc, d = run(tmp_path, {"a": SITE, "b": SITE})
     assert rc == 3
-    assert (d / "a").read_text(encoding="utf-8") == SITE and not list(d.glob("*.bak-assistant"))
+    assert (d / "a").read_text(encoding="utf-8") == SITE and not (tmp_path / "bk").exists()
 
 
 def test_no_files_found(tmp_path):
-    assert ni.main(["--domain", "didrah.com", "--include", INCLUDE, "--dirs", str(tmp_path / "missing")]) == 2
+    assert ni.main(["--domain", "didrah.com", "--include", INCLUDE, "--dirs", str(tmp_path / "missing"), "--backup-dir", str(tmp_path / "bk")]) == 2
 
 
 @pytest.mark.parametrize("listen", ["listen 443 ssl;", "listen [::]:443 ssl http2;", "listen 443;"])
