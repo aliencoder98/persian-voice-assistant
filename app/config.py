@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 10  # messages per Telegram user
     audio_max_age_s: int = 3600  # leftover audio older than this is deleted
     telegram_proxy_url: str = ""  # optional HTTPS/SOCKS proxy for api.telegram.org
+    # Optional reverse-proxy "gateway" for the Telegram Bot API, e.g. https://relay.example.com
+    # (it must forward /bot<TOKEN>/... and /file/bot<TOKEN>/... to api.telegram.org)
+    telegram_api_base_url: str = ""
+    bot_heartbeat_file: str = "/tmp/bot-heartbeat"
     mcp_port: int = 8765
     mcp_owner_telegram_id: int = 0  # 0 = first ALLOWED_USER_IDS entry
 

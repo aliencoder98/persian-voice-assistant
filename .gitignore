@@ -34,3 +34,9 @@ Thumbs.db
 
 # Tooling
 graphify-out/
+
+# Optional offline Vosk model zip (see models/README.md)
+models/*.zip
+backups/
+scripts/backup.conf
+.deploy/

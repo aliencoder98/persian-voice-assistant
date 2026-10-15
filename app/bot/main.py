@@ -21,6 +21,7 @@ from app.bot import messages
 from app.bot.pipeline import Reply, analyse, get_or_create_user
 from app.bot.preview import confirmation_keyboard, feedback_keyboard, format_preview
 from app.bot.cleanup import cleanup_loop
+from app.bot.heartbeat import heartbeat_loop
 from app.bot.ratelimit import RateLimiter
 from app.config import get_settings
 from app.db.models import AgentRun, AuditEvent, RunFeedback, VoiceMessage
@@ -219,12 +220,14 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _start_cleanup(app: Application) -> None:
     s = get_settings()
     app.bot_data["cleanup_task"] = asyncio.create_task(cleanup_loop(s.audio_dir, s.audio_max_age_s))
+    app.bot_data["heartbeat_task"] = asyncio.create_task(heartbeat_loop(s.bot_heartbeat_file))
 
 
 async def _stop_cleanup(app: Application) -> None:
-    task = app.bot_data.get("cleanup_task")
-    if task:
-        task.cancel()
+    for key in ("cleanup_task", "heartbeat_task"):
+        task = app.bot_data.get(key)
+        if task:
+            task.cancel()
 
 
 def build_application() -> Application:
@@ -235,6 +238,9 @@ def build_application() -> Application:
         raise SystemExit("ALLOWED_USER_IDS is not set; refusing to start an open bot.")
 
     builder = Application.builder().token(settings.telegram_bot_token)
+    if settings.telegram_api_base_url:
+        base = settings.telegram_api_base_url.rstrip("/")
+        builder = builder.base_url(f"{base}/bot").base_file_url(f"{base}/file/bot")
     if settings.telegram_proxy_url:
         builder = builder.proxy(settings.telegram_proxy_url).get_updates_proxy(settings.telegram_proxy_url)
     app = builder.post_init(_start_cleanup).post_shutdown(_stop_cleanup).build()

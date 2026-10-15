@@ -87,7 +87,7 @@ def health(response: Response, shallow: bool = False) -> HealthOut:
         else:
             s = get_settings()
             telegram = (
-                _probe(f"https://api.telegram.org/bot{s.telegram_bot_token}/getMe")
+                _probe(f"{(s.telegram_api_base_url or 'https://api.telegram.org').rstrip('/')}/bot{s.telegram_bot_token}/getMe")
                 if s.telegram_bot_token
                 else ComponentHealth(ok=False, detail="TELEGRAM_BOT_TOKEN not set")
             )

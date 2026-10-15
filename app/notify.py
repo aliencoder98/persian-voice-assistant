@@ -16,9 +16,10 @@ def telegram_send(chat_id: int, text: str, reply_markup: dict | None = None) -> 
     payload: dict = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    base = (s.telegram_api_base_url or "https://api.telegram.org").rstrip("/")
     try:
         resp = httpx.post(
-            f"https://api.telegram.org/bot{s.telegram_bot_token}/sendMessage",
+            f"{base}/bot{s.telegram_bot_token}/sendMessage",
             json=payload,
             timeout=15,
             proxy=s.telegram_proxy_url or None,

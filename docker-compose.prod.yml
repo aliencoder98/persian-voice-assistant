@@ -1,0 +1,193 @@
+# Production stack:  docker compose -f docker-compose.prod.yml up -d --build
+# (scripts/deploy.sh wraps this.) No source mounts: everything runs from the built image.
+# Only Caddy (80/443) is public. The API listens on 127.0.0.1 only; the bot needs no inbound port.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  image: persian-assistant:${APP_TAG:-prod}
+  env_file: .env
+  environment:
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    AUDIO_DIR: /data/audio
+    DEBUG: "false"
+  restart: unless-stopped
+  init: true
+  logging: *logging
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  db:
+    image: postgres:16.14
+    restart: unless-stopped
+    logging: *logging
+    env_file: .env
+    # Small server: modest memory settings. No published port: only other containers reach it.
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=60", "-c", "log_min_duration_statement=1000"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 768M}
+
+  # One-shot: migrations, then the dashboard's read-only role. bot, api and dashboard wait for it.
+  migrate:
+    <<: *app
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "0"
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        if [ -n "$$DASHBOARD_DB_PASSWORD" ]; then python -m app.db.roles;
+        else echo "DASHBOARD_DB_PASSWORD is empty: dashboard role skipped"; fi
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 256M}
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "app.bot.main"]
+    volumes:
+      - audio:/data/audio
+      - ./secrets:/app/secrets:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.bot.heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 1G}  # Vosk loads the Persian model into memory on first voice message
+
+  api:
+    <<: *app
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health?shallow=true')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+
+  # Read-only dashboard, served to the internet only through Caddy. No env_file: it never
+  # receives the bot token or API keys, and it connects with the read-only database role.
+  dashboard:
+    <<: *app
+    env_file: []
+    command: ["uvicorn", "app.dashboard.main:app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-assistant}
+      DASHBOARD_DB_USER: ${DASHBOARD_DB_USER:-dashboard_ro}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-}
+      DASHBOARD_SECRET_KEY: ${DASHBOARD_SECRET_KEY:-}
+      DASHBOARD_COOKIE_SECURE: ${DASHBOARD_COOKIE_SECURE:-true}
+      DAILY_TOKEN_BUDGET: ${DAILY_TOKEN_BUDGET:-0}
+      MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}
+      BUDGET_HARD_STOP: ${BUDGET_HARD_STOP:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+
+  # Reverse proxy with automatic HTTPS (Let's Encrypt) for DASHBOARD_HOST. Needs DNS to point here first.
+  proxy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      DASHBOARD_HOST: ${DASHBOARD_HOST:?set DASHBOARD_HOST in .env, e.g. usage.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 128M}
+
+  # Optional MCP server for IDEs/Claude Desktop on the server itself:  --profile mcp up -d mcp
+  mcp:
+    <<: *app
+    profiles: ["mcp"]
+    command: ["python", "-m", "app.mcp.server", "--transport", "streamable-http", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8765}:8765"
+    volumes:
+      - ./secrets:/app/secrets:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+
+volumes:
+  pgdata:
+  audio:
+  caddy_data:
+  caddy_config:

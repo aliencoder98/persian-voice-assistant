@@ -1,0 +1,27 @@
+# Caddy obtains and renews the Let's Encrypt certificate for DASHBOARD_HOST automatically.
+# Requirements: an A record for DASHBOARD_HOST pointing to this server, ports 80 and 443 reachable.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DASHBOARD_HOST} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# The dashboard sets its own CSP and sign-in. Caddy only terminates TLS and forwards.
+	reverse_proxy dashboard:8080 {
+		health_uri /healthz
+		health_interval 30s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

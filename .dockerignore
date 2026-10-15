@@ -11,3 +11,5 @@ __pycache__
 data
 graphify-out
 docs
+backups
+.deploy
