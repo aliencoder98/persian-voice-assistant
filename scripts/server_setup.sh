@@ -3,7 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/rezashokrzad/persian-voice-assistant/main/scripts/server_setup.sh | bash
 #
-# (or, from a clone:  sudo bash scripts/server_setup.sh)
+# Short to type (a console without paste):
+#   git clone https://github.com/rezashokrzad/persian-voice-assistant /tmp/a
+#   bash /tmp/a/scripts/server_setup.sh
 #
 # It is safe to run twice. It does NOT touch the firewall, the SSH settings, your existing nginx sites
 # (except one added `include` line in the didrah.com HTTPS block, backed up and tested with `nginx -t`),
@@ -58,6 +60,10 @@ else
   fi
 fi
 usermod -aG docker deploy
+if sshd -T 2>/dev/null | grep -qiE '^(allowusers|allowgroups) '; then
+  echo "WARNING: sshd restricts who may log in:"; sshd -T | grep -iE '^(allowusers|allowgroups) '
+  echo "         add the user deploy there, or deploy will be refused over SSH."
+fi
 docker --version && docker compose version
 
 log "4/6 the code (public repository)"
@@ -88,7 +94,12 @@ location /dashboard/ {
     proxy_read_timeout 60s;
 }
 EOF
-  curl -fsSL "$RAW/scripts/nginx_include.py" -o /tmp/nginx_include.py
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+  if [ -n "$HERE" ] && [ -f "$HERE/nginx_include.py" ]; then
+    cp "$HERE/nginx_include.py" /tmp/nginx_include.py
+  else
+    curl -fsSL "$RAW/scripts/nginx_include.py" -o /tmp/nginx_include.py
+  fi
   set +e
   python3 /tmp/nginx_include.py --domain "$DOMAIN" --include "snippets/assistant-dashboard.conf"
   rc=$?
