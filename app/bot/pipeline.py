@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from app.agent.agent import process_message
-from app.agent.context import AgentContext
 from app.agent.executor import supersede_run
+from app.agent.memory import build_context
 from app.agent.llm import DeepSeekProvider, LLMError, LLMProvider
 from app.agent.schemas import Action, EmailAction, ScheduleAction
 from app.config import get_settings
@@ -47,10 +47,6 @@ class Reply:
     action: Action | None = None
 
 
-def build_agent_context(session, user: User, text: str, draft: dict | None) -> AgentContext:
-    return AgentContext(owner_name=user.name, owner_email=user.email, draft=draft)
-
-
 def analyse(
     tg_user,
     text: str,
@@ -70,7 +66,7 @@ def analyse(
             provider = get_provider()
         except LLMError:
             return Reply("failed")
-        agent_ctx = build_agent_context(session, user, text, draft)
+        agent_ctx = build_context(session, user, text, draft)
         run, outcome = process_message(
             session, provider, user, text, agent_ctx, voice_message_id=voice_message_id
         )
