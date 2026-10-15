@@ -98,3 +98,64 @@ def test_bot_uses_the_gateway_for_polling(monkeypatch):
     monkeypatch.setattr(s, "telegram_api_base_url", "https://relay.example.com/")
     app = bot.build_application()
     assert app.bot.base_url == "https://relay.example.com/bot123:ABC"
+
+
+# ---- connection retries (the Docker DNS flake seen in practice)
+
+
+def test_retry_connect_retries_only_connection_failures():
+    from app.tools.http_retry import retry_connect
+
+    sleeps, calls = [], {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ConnectError("No address associated with hostname")
+        return "ok"
+
+    assert retry_connect(flaky, sleep=sleeps.append) == "ok" and calls["n"] == 3 and sleeps == [1.0, 2.0]
+
+    calls["n"] = 0
+
+    def always():
+        calls["n"] += 1
+        raise httpx.ConnectError("down")
+
+    try:
+        retry_connect(always, attempts=2, sleep=lambda s: None)
+    except httpx.ConnectError:
+        pass
+    assert calls["n"] == 2
+
+    # a read timeout may mean the server already acted: never repeat it
+    calls["n"] = 0
+
+    def slow():
+        calls["n"] += 1
+        raise httpx.ReadTimeout("slow")
+
+    try:
+        retry_connect(slow, sleep=lambda s: None)
+    except httpx.ReadTimeout:
+        pass
+    assert calls["n"] == 1
+
+
+def test_resend_survives_a_dns_hiccup_and_sends_once(monkeypatch):
+    from app.tools import http_retry, resend_client
+
+    s = get_settings()
+    monkeypatch.setattr(s, "resend_api_key", "re_key")
+    monkeypatch.setattr(s, "email_from", "a@example.com")
+    monkeypatch.setattr(http_retry.time, "sleep", lambda x: None)
+    attempts = {"n": 0}
+
+    def fake_post(url, **kw):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise httpx.ConnectError("No address associated with hostname")
+        return httpx.Response(200, json={"id": "msg_1"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(resend_client.httpx, "post", fake_post)
+    assert resend_client.send_email("to@example.com", "s", "b") == "msg_1" and attempts["n"] == 2

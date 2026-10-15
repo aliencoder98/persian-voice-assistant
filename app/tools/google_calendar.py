@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.config import get_settings
+from app.tools.http_retry import retry_connect
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API = "https://www.googleapis.com/calendar/v3"
@@ -30,7 +31,8 @@ class GoogleCalendar:
             return self._token
         if not (s.google_client_id and s.google_client_secret and s.google_refresh_token):
             raise GoogleError("Google credentials are not configured (see README).")
-        resp = self._client.post(
+        resp = self._send(
+            "POST",
             TOKEN_URL,
             data={
                 "client_id": s.google_client_id,
@@ -45,6 +47,9 @@ class GoogleCalendar:
         self._token = data["access_token"]
         self._token_expiry = time.time() + int(data.get("expires_in", 3600))
         return self._token
+
+    def _send(self, method: str, url: str, **kw) -> httpx.Response:
+        return retry_connect(lambda: self._client.request(method, url, **kw))
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._access_token()}"}
@@ -76,11 +81,11 @@ class GoogleCalendar:
             "attendees": [{"email": g} for g in guests],
         }
         url = f"{API}/calendars/{self._calendar}/events"
-        resp = self._client.post(
-            url, params={"sendUpdates": "all"}, json=body, headers=self._headers()
+        resp = self._send(
+            "POST", url, params={"sendUpdates": "all"}, json=body, headers=self._headers()
         )
         if resp.status_code == 409:  # same id already created: a retry, not a new event
-            resp = self._client.get(f"{url}/{event_id}", headers=self._headers())
+            resp = self._send("GET", f"{url}/{event_id}", headers=self._headers())
         if resp.status_code >= 400:
             raise GoogleError(f"Calendar API error {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
@@ -94,7 +99,8 @@ class GoogleCalendar:
         tz = ZoneInfo(TZ_NAME)
         start = dt.datetime.combine(first_day, dt.time.min, tzinfo=tz)
         end = start + dt.timedelta(days=days)
-        resp = self._client.get(
+        resp = self._send(
+            "GET",
             f"{API}/calendars/{self._calendar}/events",
             params={
                 "timeMin": start.isoformat(),

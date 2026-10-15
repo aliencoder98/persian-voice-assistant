@@ -5,6 +5,7 @@ import logging
 import httpx
 
 from app.config import get_settings
+from app.tools.http_retry import retry_connect
 
 log = logging.getLogger("notify")
 
@@ -18,11 +19,9 @@ def telegram_send(chat_id: int, text: str, reply_markup: dict | None = None) -> 
         payload["reply_markup"] = reply_markup
     base = (s.telegram_api_base_url or "https://api.telegram.org").rstrip("/")
     try:
-        resp = httpx.post(
-            f"{base}/bot{s.telegram_bot_token}/sendMessage",
-            json=payload,
-            timeout=15,
-            proxy=s.telegram_proxy_url or None,
+        url = f"{base}/bot{s.telegram_bot_token}/sendMessage"
+        resp = retry_connect(
+            lambda: httpx.post(url, json=payload, timeout=15, proxy=s.telegram_proxy_url or None)
         )
         resp.raise_for_status()
         return True

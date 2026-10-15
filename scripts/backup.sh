@@ -8,6 +8,7 @@
 #   COMPOSE_FILE=docker-compose.prod.yml   BACKUP_DIR=./backups   KEEP_LOCAL=7
 #   BACKUP_RCLONE_REMOTE=myremote:assistant-backups     (needs rclone configured)   -- or --
 #   BACKUP_SCP_TARGET=backup@other-host:/srv/backups/assistant   (needs SSH key login)
+#   BACKUP_AGE_RECIPIENT=age1...   encrypt the off-server copy with `age` (recommended: dumps hold transcripts and emails)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,11 +47,21 @@ ls -1t "$BACKUP_DIR"/assistant-*.dump 2>/dev/null | tail -n +"$((KEEP_LOCAL + 1)
 done
 
 offsite=0
-if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
-  if rclone copy "$file" "$file.sha256" "$BACKUP_RCLONE_REMOTE"; then offsite=1; echo "[backup] copied to $BACKUP_RCLONE_REMOTE"; fi
-elif [ -n "${BACKUP_SCP_TARGET:-}" ]; then
-  if scp -q -o BatchMode=yes "$file" "$file.sha256" "$BACKUP_SCP_TARGET/"; then offsite=1; echo "[backup] copied to $BACKUP_SCP_TARGET"; fi
+send_file="$file"; send_sum="$file.sha256"
+if [ -n "${BACKUP_AGE_RECIPIENT:-}" ] && { [ -n "${BACKUP_RCLONE_REMOTE:-}" ] || [ -n "${BACKUP_SCP_TARGET:-}" ]; }; then
+  age -r "$BACKUP_AGE_RECIPIENT" -o "$file.age" "$file"   # decrypt later: age -d -i key.txt FILE.age > FILE
+  send_file="$file.age"; send_sum=""
+  echo "[backup] encrypted the off-server copy with age"
 fi
+if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
+  if rclone copy "$send_file" "$BACKUP_RCLONE_REMOTE"; then
+    [ -n "$send_sum" ] && rclone copy "$send_sum" "$BACKUP_RCLONE_REMOTE"
+    offsite=1; echo "[backup] copied to $BACKUP_RCLONE_REMOTE"
+  fi
+elif [ -n "${BACKUP_SCP_TARGET:-}" ]; then
+  if scp -q -o BatchMode=yes "$send_file" ${send_sum:+"$send_sum"} "$BACKUP_SCP_TARGET/"; then offsite=1; echo "[backup] copied to $BACKUP_SCP_TARGET"; fi
+fi
+[ "$send_file" != "$file" ] && rm -f "$send_file"
 
 if [ "$offsite" -eq 0 ]; then
   echo "[backup] WARNING: no off-server copy (set BACKUP_RCLONE_REMOTE or BACKUP_SCP_TARGET). A backup on the same disk does not survive losing the server." >&2

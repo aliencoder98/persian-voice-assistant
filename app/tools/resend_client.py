@@ -1,6 +1,7 @@
 import httpx
 
 from app.config import get_settings
+from app.tools.http_retry import retry_connect
 
 RESEND_URL = "https://api.resend.com/emails"
 
@@ -36,11 +37,8 @@ def send_email(
         headers["Idempotency-Key"] = idempotency_key  # Resend dedupes repeats for 24h
 
     try:
-        response = httpx.post(
-            RESEND_URL,
-            json=payload,
-            headers=headers,
-            timeout=20,
+        response = retry_connect(
+            lambda: httpx.post(RESEND_URL, json=payload, headers=headers, timeout=20)
         )
     except httpx.HTTPError as exc:
         raise EmailError(f"Could not reach Resend: {exc}") from exc
