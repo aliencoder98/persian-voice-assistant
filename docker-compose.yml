@@ -10,10 +10,8 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    # Same source and parsing as the app containers, so special characters in the password match.
+    env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
