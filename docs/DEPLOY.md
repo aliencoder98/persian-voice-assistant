@@ -180,6 +180,8 @@ TELEGRAM_API_BASE_URL=https://relay.example.com
 TELEGRAM_API_BASE_URL=https://tg.example.com
 ```
 
+**DNS for the Worker domain (Cloudflare):** the zone (for example `example.com`) must be managed in Cloudflare DNS. In the Worker choose *Settings > Domains & Routes > Add > Custom domain* and enter `tg.example.com`: Cloudflare creates the (proxied) DNS record itself, so do **not** add an A record by hand, and delete any existing `tg` record first. If you prefer the manual way: create a proxied (orange cloud) `A` record `tg` pointing to the placeholder `192.0.2.1`, and add the Worker route `tg.example.com/*`. If the domain's DNS is not on Cloudflare, use another domain that is, rather than moving your main site's nameservers.
+
 Check from the server before going on: `curl -s https://tg.example.com/bot<YOUR_TOKEN>/getMe` must return `{"ok":true,...}`. Anyone without the token gets a 404. Cloudflare can technically see the traffic, so only use an account you control.
 
 **Under a path of a site already on Cloudflare** (for example `https://example.com/tg`): in the Worker add a *Route* `example.com/tg/*` instead of a custom domain, add the plain variable `PATH_PREFIX` = `/tg`, and set `TELEGRAM_API_BASE_URL=https://example.com/tg`. This only works if the site is proxied by Cloudflare (orange cloud) so that requests never reach your own server. A `/tg` location in your own nginx does **not** work: it would call Telegram from the same blocked server.
