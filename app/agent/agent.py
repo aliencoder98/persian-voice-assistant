@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.context import AgentContext, render_user_message
 from app.agent.llm import LLMError, LLMProvider
+from app.agent.llm_log import purpose_var
 from app.agent.prompt import PROMPT_VERSION, SYSTEM_PROMPT
 from app.agent.schemas import Action, Clarification, EmailAction, ScheduleAction
 from app.db.models import AgentRun, Intent, RunStatus, User
@@ -124,6 +125,7 @@ def run_agent(
 
     step = 0
     for step in range(1, max_steps + 1):
+        purpose_var.set("intent" if step == 1 else "tool_step")
         resp = provider.chat(messages, tools)
         tokens += resp.total_tokens
         log.info("llm step", extra={"step": step, "tokens": resp.total_tokens, "tool_calls": len(resp.tool_calls)})

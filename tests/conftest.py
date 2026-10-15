@@ -61,3 +61,11 @@ def user(session):
 @pytest.fixture
 def ctx(session, user):
     return ToolContext(session=session, user=user, now=lambda: FIXED_NOW)
+
+
+@pytest.fixture(autouse=True)
+def llm_rows(monkeypatch):
+    """Providers record their calls; in tests that goes to a list instead of the real database."""
+    rows: list[dict] = []
+    monkeypatch.setattr("app.agent.llm_log.record_llm_call", lambda **kw: rows.append(kw))
+    return rows

@@ -2,13 +2,18 @@ import datetime as dt
 import enum
 from typing import Any
 
+from decimal import Decimal
+
 from sqlalchemy import (
     BigInteger,
     Date,
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
+    Numeric,
+    SmallInteger,
     String,
     Text,
     Time,
@@ -166,3 +171,54 @@ class AuditEvent(TimestampMixin, Base):
     event_type: Mapped[str] = mapped_column(String(100), index=True)
     actor: Mapped[str] = mapped_column(String(100))
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class LlmPurpose(str, enum.Enum):
+    stt_fix = "stt_fix"
+    intent = "intent"
+    tool_step = "tool_step"
+    review = "review"
+
+
+class LlmCall(TimestampMixin, Base):
+    """One row per call to the LLM provider (written by the provider itself)."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (Index("ix_llm_calls_created_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"), index=True)
+    model: Mapped[str] = mapped_column(String(100), index=True)
+    purpose: Mapped[LlmPurpose] = mapped_column(_enum(LlmPurpose, "llm_purpose"))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="ok", index=True)  # ok | error
+    error: Mapped[str | None] = mapped_column(Text)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RunFeedback(TimestampMixin, Base):
+    """Optional thumbs up (1) / down (-1) under a bot reply."""
+
+    __tablename__ = "run_feedback"
+    __table_args__ = (UniqueConstraint("run_id", "user_id", name="uq_run_feedback_run_id_user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    rating: Mapped[int] = mapped_column(SmallInteger)
+
+
+class BudgetAlert(TimestampMixin, Base):
+    """Remembers which budget thresholds were already announced, so each fires once per period."""
+
+    __tablename__ = "budget_alerts"
+    __table_args__ = (UniqueConstraint("period", "threshold", name="uq_budget_alerts_period_threshold"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    period: Mapped[str] = mapped_column(String(32))  # e.g. "day:2026-10-15", "month:1405-07"
+    threshold: Mapped[int] = mapped_column(Integer)  # 80 or 100
+    tokens_used: Mapped[int] = mapped_column(BigInteger)

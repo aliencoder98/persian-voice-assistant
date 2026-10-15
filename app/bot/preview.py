@@ -39,6 +39,18 @@ def format_preview(action: Action) -> str:
     )
 
 
+def _thumbs(run_id: int) -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton("👍", callback_data=f"fb:{run_id}:1"),
+        InlineKeyboardButton("👎", callback_data=f"fb:{run_id}:-1"),
+    ]
+
+
+def feedback_keyboard(run_id: int) -> InlineKeyboardMarkup:
+    """Optional thumbs under a reply that has no other buttons."""
+    return InlineKeyboardMarkup([_thumbs(run_id)])
+
+
 def confirmation_keyboard(run_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -46,6 +58,7 @@ def confirmation_keyboard(run_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("✅ تأیید", callback_data=f"ok:{run_id}"),
                 InlineKeyboardButton("✏️ ویرایش", callback_data=f"ed:{run_id}"),
                 InlineKeyboardButton("❌ لغو", callback_data=f"no:{run_id}"),
-            ]
+            ],
+            _thumbs(run_id),
         ]
     )

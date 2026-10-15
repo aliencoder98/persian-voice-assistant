@@ -32,6 +32,7 @@ class LLMResponse:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0  # prompt tokens served from the provider's cache
 
     @property
     def total_tokens(self) -> int:
@@ -70,6 +71,7 @@ class DeepSeekProvider:
         max_retries: int | None = None,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        recorder: Callable[..., None] | None = None,
     ) -> None:
         s = get_settings()
         self.api_key = api_key if api_key is not None else s.deepseek_api_key
@@ -78,6 +80,7 @@ class DeepSeekProvider:
         self.max_retries = s.deepseek_max_retries if max_retries is None else max_retries
         self._client = client or httpx.Client(timeout=timeout_s or s.deepseek_timeout_s)
         self._sleep = sleep
+        self._recorder = recorder
         if not self.api_key:
             raise LLMError("DEEPSEEK_API_KEY is not set.")
 
@@ -87,6 +90,7 @@ class DeepSeekProvider:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
+        started = time.perf_counter()
         last_error = "unknown error"
         for attempt in range(self.max_retries + 1):
             try:
@@ -99,16 +103,35 @@ class DeepSeekProvider:
                 last_error = f"{type(exc).__name__}: {exc}"
             else:
                 if resp.status_code < 400:
-                    return self._parse(resp.json())
+                    parsed = self._parse(resp.json())
+                    self._record(parsed, started, attempt)
+                    return parsed
                 last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
                 if resp.status_code not in RETRYABLE_STATUS:
+                    self._record(None, started, attempt, last_error)
                     raise LLMError(last_error)
 
             if attempt < self.max_retries:
                 delay = min(2**attempt, 20) + random.uniform(0, 0.5)
                 log.warning("LLM call failed (%s); retry %d in %.1fs", last_error, attempt + 1, delay)
                 self._sleep(delay)
+        self._record(None, started, self.max_retries, last_error)
         raise LLMError(f"LLM unavailable after {self.max_retries + 1} attempts: {last_error}")
+
+    def _record(self, resp: "LLMResponse | None", started: float, retries: int, error: str | None = None) -> None:
+        recorder = self._recorder
+        if recorder is None:
+            from app.agent.llm_log import record_llm_call as recorder
+        recorder(
+            model=self.model,
+            prompt_tokens=resp.prompt_tokens if resp else 0,
+            completion_tokens=resp.completion_tokens if resp else 0,
+            cached_tokens=resp.cached_tokens if resp else 0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            status="ok" if resp else "error",
+            error=error,
+            retries=retries,
+        )
 
     @staticmethod
     def _parse(data: dict[str, Any]) -> LLMResponse:
@@ -129,4 +152,7 @@ class DeepSeekProvider:
             ],
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            cached_tokens=usage.get("prompt_cache_hit_tokens")
+            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+            or 0,
         )

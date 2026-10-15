@@ -2,7 +2,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from telegram import Update
+from sqlalchemy import select
+from telegram import InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -18,11 +19,11 @@ from telegram.ext import (
 from app.agent.executor import cancel_run, confirm_run
 from app.bot import messages
 from app.bot.pipeline import Reply, analyse, get_or_create_user
-from app.bot.preview import confirmation_keyboard, format_preview
+from app.bot.preview import confirmation_keyboard, feedback_keyboard, format_preview
 from app.bot.cleanup import cleanup_loop
 from app.bot.ratelimit import RateLimiter
 from app.config import get_settings
-from app.db.models import AuditEvent, VoiceMessage
+from app.db.models import AgentRun, AuditEvent, RunFeedback, VoiceMessage
 from app.db.session import SessionLocal
 from app.logging_config import setup_logging
 from app.stt.vosk_stt import SttError, transcribe_ogg
@@ -72,7 +73,9 @@ async def respond(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str,
         analyse, update.effective_user, text, voice_message_id=voice_id, editing_run_id=editing
     )
     if reply.kind == "clarify":
-        await msg.reply_text(reply.text)
+        await msg.reply_text(reply.text, reply_markup=feedback_keyboard(reply.run_id))
+    elif reply.kind == "blocked":
+        await msg.reply_text(messages.BUDGET_STOP)
     elif reply.kind == "failed":
         await msg.reply_text(messages.AGENT_FAILED)
     else:
@@ -86,6 +89,9 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    if query.data.startswith("fb:"):
+        await _feedback(update, context)
+        return
     action, _, raw_id = query.data.partition(":")
     run_id = int(raw_id)
     await query.edit_message_reply_markup(reply_markup=None)  # buttons vanish on the first tap
@@ -104,7 +110,35 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if action == "ok":
         await query.message.reply_text(messages.CONFIRMING)
     result = await asyncio.to_thread(work)
-    await query.message.reply_text(result.message)
+    await query.message.reply_text(result.message, reply_markup=feedback_keyboard(run_id))
+
+
+def _save_feedback(tg_user, run_id: int, rating: int) -> bool:
+    with SessionLocal() as session:
+        user = get_or_create_user(session, tg_user)
+        run = session.get(AgentRun, run_id)
+        if run is None or run.user_id != user.id:
+            return False
+        row = session.scalar(
+            select(RunFeedback).where(RunFeedback.run_id == run_id, RunFeedback.user_id == user.id)
+        )
+        if row is None:
+            session.add(RunFeedback(run_id=run_id, user_id=user.id, rating=rating))
+        else:
+            row.rating = rating
+        session.commit()
+        return True
+
+
+async def _feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    _, raw_id, raw_rating = query.data.split(":")
+    saved = await asyncio.to_thread(_save_feedback, update.effective_user, int(raw_id), int(raw_rating))
+    await query.answer(messages.FEEDBACK_THANKS if saved else messages.ERROR)
+    # drop only the thumbs row; keep Confirm/Edit/Cancel if they are still there
+    rows = list(query.message.reply_markup.inline_keyboard) if query.message.reply_markup else []
+    remaining = [r for r in rows if not any(b.callback_data.startswith("fb:") for b in r)]
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(remaining) if remaining else None)
 
 
 # ---------- voice ----------
@@ -207,7 +241,7 @@ def build_application() -> Application:
     app.add_handler(TypeHandler(Update, guard), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|ed):\d+$"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^((ok|no|ed):\d+|fb:\d+:-?1)$"))
     app.add_handler(MessageHandler(filters.VOICE, voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
     app.add_error_handler(on_error)

@@ -37,6 +37,29 @@ class Settings(BaseSettings):
     deepseek_timeout_s: float = 30.0
     deepseek_max_retries: int = 3
 
+    # USD per 1M tokens, per model; "*" is the fallback. Peak-hour list prices (an upper bound); edit
+    # to match your plan. Cached input tokens use input_hit.
+    llm_prices_json: str = (
+        '{"deepseek-chat": {"input_miss": 0.30, "input_hit": 0.006, "output": 1.20},'
+        ' "deepseek-flash": {"input_miss": 0.30, "input_hit": 0.006, "output": 1.20},'
+        ' "*": {"input_miss": 0.30, "input_hit": 0.006, "output": 1.20}}'
+    )
+
+    # Budgets count prompt+completion tokens. 0 = no limit. "Today" is the Asia/Tehran calendar day,
+    # "month" the current Jalali month.
+    daily_token_budget: int = 0
+    monthly_token_budget: int = 0
+    budget_hard_stop: bool = False  # refuse new requests once a budget reaches 100%
+
+    # Dashboard (separate read-only database role, password login, signed session cookie)
+    dashboard_db_user: str = "dashboard_ro"
+    dashboard_db_password: str = ""
+    dashboard_password_hash: str = ""  # python -m app.dashboard.hashpw
+    dashboard_secret_key: str = ""
+    dashboard_cookie_secure: bool = False  # true behind HTTPS
+    dashboard_host: str = "localhost"
+    dashboard_port: int = 8080
+
     google_client_id: str = ""
     google_client_secret: str = ""
     google_refresh_token: str = ""
@@ -73,6 +96,12 @@ class Settings(BaseSettings):
     def allowed_ids(self) -> frozenset[int]:
         return frozenset(
             int(part) for part in self.allowed_user_ids.replace(" ", "").split(",") if part
+        )
+
+    @property
+    def dashboard_database_url(self) -> URL:
+        return self.database_url.set(
+            username=self.dashboard_db_user, password=self.dashboard_db_password
         )
 
     @property

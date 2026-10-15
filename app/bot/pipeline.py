@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
+from app import budget
 from app.agent.agent import process_message
 from app.agent.executor import supersede_run
 from app.agent.memory import build_context
@@ -41,7 +42,7 @@ def get_or_create_user(session, tg_user) -> User:
 
 @dataclass
 class Reply:
-    kind: str  # schedule | email | clarify | failed
+    kind: str  # schedule | email | clarify | failed | blocked
     run_id: int | None = None
     text: str | None = None  # clarification question
     action: Action | None = None
@@ -69,6 +70,8 @@ def analyse_for_user(
     voice_message_id: int | None = None,
     editing_run_id: int | None = None,
 ) -> Reply:
+    if budget.is_blocked(session):
+        return Reply("blocked")
     draft = None
     if editing_run_id is not None:
         old = session.get(AgentRun, editing_run_id)
