@@ -92,6 +92,9 @@ def run_tool(
     """
     tool = REGISTRY.get(name)
     if tool is None or not allow(tool):
+        record_tool_call(
+            ctx, name, {"raw": str(raw_args)[:500]}, None, "rejected", None, "unknown or not allowed"
+        )
         return ToolResult(False, error=f"Unknown tool: {name}")
 
     try:
@@ -99,14 +102,14 @@ def run_tool(
         if not isinstance(args_dict, dict):
             raise ValueError("arguments must be a JSON object")
     except ValueError as exc:
-        _log(ctx, name, {"raw": str(raw_args)[:500]}, None, "invalid", None, str(exc))
+        record_tool_call(ctx, name, {"raw": str(raw_args)[:500]}, None, "invalid", None, str(exc))
         return ToolResult(False, error=f"Invalid arguments JSON: {exc}")
 
     try:
         args = tool.args_model.model_validate(args_dict)
     except ValidationError as exc:
         msg = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
-        _log(ctx, name, args_dict, None, "invalid", None, msg)
+        record_tool_call(ctx, name, args_dict, None, "invalid", None, msg)
         return ToolResult(False, error=f"Invalid arguments: {msg}")
 
     row = None
@@ -145,7 +148,7 @@ def run_tool(
     return result
 
 
-def _log(ctx: ToolContext, name: str, args, result, status: str, key, error: str | None) -> None:
+def record_tool_call(ctx: ToolContext, name: str, args, result, status: str, key, error: str | None) -> None:
     if ctx.run_id is None:
         return
     ctx.session.add(
