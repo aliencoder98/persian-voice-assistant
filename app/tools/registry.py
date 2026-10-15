@@ -2,6 +2,7 @@
 
 import datetime as dt
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ToolCall, User
 
+log = logging.getLogger("tools")
 TEHRAN = ZoneInfo("Asia/Tehran")
 
 
@@ -141,6 +143,10 @@ def run_tool(
     except Exception as exc:  # tool failures go back to the caller as data, never crash the loop
         result = ToolResult(False, error=f"{type(exc).__name__}: {exc}")
 
+    log.info(
+        "tool call",
+        extra={"tool": name, "ok": result.ok, "ms": int((time.perf_counter() - started) * 1000)},
+    )
     if row is not None:
         row.status = "ok" if result.ok else "error"
         row.result_json = json.loads(result.to_json())["result"] if result.ok else {"error": result.error}

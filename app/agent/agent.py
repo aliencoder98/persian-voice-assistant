@@ -126,6 +126,7 @@ def run_agent(
     for step in range(1, max_steps + 1):
         resp = provider.chat(messages, tools)
         tokens += resp.total_tokens
+        log.info("llm step", extra={"step": step, "tokens": resp.total_tokens, "tool_calls": len(resp.tool_calls)})
         messages.append(resp.as_message())
 
         if not resp.tool_calls:
@@ -244,4 +245,10 @@ def process_message(
         run.intent = Intent.unknown
         run.error = outcome.error
     session.commit()
+    with bind_run_id(run.id):
+        log.info(
+            "run finished",
+            extra={"kind": outcome.kind, "status": run.status.value, "tokens": run.tokens,
+                   "latency_ms": run.latency_ms, "steps": outcome.steps},
+        )  # fmt: skip
     return run, outcome

@@ -19,19 +19,33 @@ from app.agent.executor import cancel_run, confirm_run
 from app.bot import messages
 from app.bot.pipeline import Reply, analyse, get_or_create_user
 from app.bot.preview import confirmation_keyboard, format_preview
+from app.bot.cleanup import cleanup_loop
+from app.bot.ratelimit import RateLimiter
 from app.config import get_settings
 from app.db.models import AuditEvent, VoiceMessage
 from app.db.session import SessionLocal
+from app.logging_config import setup_logging
 from app.stt.vosk_stt import SttError, transcribe_ogg
 
 log = logging.getLogger("bot")
+_limiter: RateLimiter | None = None
 
 
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Runs before every other handler; stops everyone not on the allowlist."""
+    global _limiter
     user = update.effective_user
     if user is not None and user.id in get_settings().allowed_ids:
-        return
+        if _limiter is None:
+            _limiter = RateLimiter(get_settings().rate_limit_per_minute)
+        if _limiter.allow(user.id):
+            return
+        log.warning("Rate limited user %s", user.id)
+        if update.callback_query is not None:
+            await update.callback_query.answer(messages.RATE_LIMITED, show_alert=True)
+        elif update.effective_message is not None:
+            await update.effective_message.reply_text(messages.RATE_LIMITED)
+        raise ApplicationHandlerStop
     log.warning("Refused user %s", user.id if user else None)
     if update.effective_message is not None:
         await update.effective_message.reply_text(messages.REFUSED)
@@ -130,6 +144,10 @@ def _finish_voice(voice_id: int, text: str, confidence: float) -> None:
 async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     tg_voice = msg.voice
+    max_s = get_settings().max_voice_seconds
+    if (tg_voice.duration or 0) > max_s:
+        await msg.reply_text(messages.VOICE_TOO_LONG.format(max=max_s))
+        return
     audio_dir = Path(get_settings().audio_dir) / str(update.effective_user.id)
     audio_dir.mkdir(parents=True, exist_ok=True)
     path = audio_dir / f"{tg_voice.file_unique_id}.ogg"
@@ -164,6 +182,17 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(messages.ERROR)
 
 
+async def _start_cleanup(app: Application) -> None:
+    s = get_settings()
+    app.bot_data["cleanup_task"] = asyncio.create_task(cleanup_loop(s.audio_dir, s.audio_max_age_s))
+
+
+async def _stop_cleanup(app: Application) -> None:
+    task = app.bot_data.get("cleanup_task")
+    if task:
+        task.cancel()
+
+
 def build_application() -> Application:
     settings = get_settings()
     if not settings.telegram_bot_token:
@@ -171,7 +200,10 @@ def build_application() -> Application:
     if not settings.allowed_ids:
         raise SystemExit("ALLOWED_USER_IDS is not set; refusing to start an open bot.")
 
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    builder = Application.builder().token(settings.telegram_bot_token)
+    if settings.telegram_proxy_url:
+        builder = builder.proxy(settings.telegram_proxy_url).get_updates_proxy(settings.telegram_proxy_url)
+    app = builder.post_init(_start_cleanup).post_shutdown(_stop_cleanup).build()
     app.add_handler(TypeHandler(Update, guard), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -183,11 +215,7 @@ def build_application() -> Application:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=get_settings().log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # keeps the bot token out of logs
+    setup_logging(get_settings().log_level)
     build_application().run_polling(allowed_updates=Update.ALL_TYPES)
 
 
