@@ -55,6 +55,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # MCP server (streamable HTTP on 127.0.0.1 only). For stdio clients see the README.
+  mcp:
+    <<: *app
+    command: ["python", "-m", "app.mcp.server", "--transport", "streamable-http", "--host", "0.0.0.0"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8765}:${MCP_PORT:-8765}"
+    volumes:
+      - ./secrets:/app/secrets:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
   audio:

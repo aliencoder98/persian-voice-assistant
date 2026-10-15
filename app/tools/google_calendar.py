@@ -87,9 +87,13 @@ class GoogleCalendar:
         return {"id": data["id"], "html_link": data.get("htmlLink")}
 
     def list_events(self, date: dt.date) -> list[dict]:
+        return self.list_range(date, 1)
+
+    def list_range(self, first_day: dt.date, days: int) -> list[dict]:
+        """Events from the start of `first_day` for `days` days, in Asia/Tehran time."""
         tz = ZoneInfo(TZ_NAME)
-        start = dt.datetime.combine(date, dt.time.min, tzinfo=tz)
-        end = start + dt.timedelta(days=1)
+        start = dt.datetime.combine(first_day, dt.time.min, tzinfo=tz)
+        end = start + dt.timedelta(days=days)
         resp = self._client.get(
             f"{API}/calendars/{self._calendar}/events",
             params={

@@ -63,6 +63,48 @@ Events are created in `Asia/Tehran` time with `sendUpdates=all`, so guests recei
 - Every run (tokens, latency, model, prompt version) and every tool call is in `agent_runs` / `tool_calls`; confirmations are in `audit_events`.
 - Memory per message: date/time, preferences, contacts mentioned in the message, the last 5 messages. After an executed action, new contacts and the usual meeting length are saved through the `save_contact` / `remember` tools.
 
+## Admin API
+
+`docker compose up` serves FastAPI on `127.0.0.1:${API_PORT:-8000}`. `GET /health` checks the database, Telegram and the LLM provider (`?shallow=true` checks only the database). Everything else needs the header `X-Admin-Key: $ADMIN_API_KEY` (the endpoints are disabled while the variable is empty):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /runs?status=&intent=&user_id=&model=&since=&until=&limit=&offset=` | paginated runs |
+| `GET /runs/{id}` | transcript, action JSON, tool calls |
+| `POST /runs/{id}/retry` | failed during execution: runs it again (it was confirmed; provider idempotency keys prevent duplicates; you get a Telegram message). Failed before an action existed: re-runs the agent and sends the new preview to Telegram, which still needs your Confirm |
+| `GET /events`, `GET /emails` | audit events, sent emails |
+| `GET /contacts`, `POST /contacts` | list and add contacts |
+
+```bash
+curl -H "X-Admin-Key: $ADMIN_API_KEY" "http://127.0.0.1:8000/runs?status=failed&limit=5"
+```
+
+Responses never include audio paths, Telegram file ids or configured secrets (errors are scrubbed). OpenAPI docs (`/docs`) exist only when `DEBUG=true`.
+
+## MCP server
+
+The same tools the agent uses, as an [MCP](https://modelcontextprotocol.io) server: `find_contact`, `list_calendar_events`, `create_calendar_event`, `send_email`, plus the resource `calendar://upcoming` (next 7 days). `create_calendar_event` and `send_email` do nothing unless `confirm=true` (otherwise they return a preview), and every write attempt is recorded in `audit_events` with actor `mcp`. It acts as the owner (the first `ALLOWED_USER_IDS` entry).
+
+- **HTTP** (started by `docker compose up`, bound to localhost): `http://127.0.0.1:8765/mcp`
+  - Claude Code: `claude mcp add --transport http voice-assistant http://127.0.0.1:8765/mcp`
+  - Cursor / VS Code / other IDEs: add a server of type `http` with that URL.
+- **stdio** (Claude Desktop): edit `claude_desktop_config.json` (Settings → Developer → Edit Config) and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "voice-assistant": {
+      "command": "docker",
+      "args": ["compose", "-f", "C:/Users/you/Desktop/Personal Assistant/docker-compose.yml",
+               "run", "--rm", "-i", "-T", "--no-deps", "mcp",
+               "python", "-m", "app.mcp.server", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+The database container must be running (`docker compose up -d db`). The HTTP endpoint has no authentication of its own; it is only reachable from your machine, so do not publish that port.
+
 ## Tests
 
 ```bash
