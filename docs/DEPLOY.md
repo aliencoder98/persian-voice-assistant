@@ -174,6 +174,14 @@ Restrict it (nginx `allow YOUR_SERVER_IP; deny all;` or a firewall rule) so only
 TELEGRAM_API_BASE_URL=https://relay.example.com
 ```
 
+**No VPS abroad? Use a free Cloudflare Worker as the gateway.** `deploy/telegram-gateway-worker.js` forwards only requests for *your* bot token to Telegram (the token is stored as a Worker secret). Steps: Cloudflare dashboard > Workers & Pages > Create > Hello World > paste the file > Deploy; Settings > Variables and Secrets > secret `BOT_TOKEN` = your bot token; Settings > Domains & Routes > add a custom domain on a Cloudflare-managed zone (for example `tg.example.com`; the `workers.dev` address is often unreachable from Iran). Then:
+
+```
+TELEGRAM_API_BASE_URL=https://tg.example.com
+```
+
+Check from the server before going on: `curl -s https://tg.example.com/bot<YOUR_TOKEN>/getMe` must return `{"ok":true,...}`. Anyone without the token gets a 404. Cloudflare can technically see the traffic, so only use an account you control.
+
 Alternative: an HTTP(S) or SOCKS5 proxy, `TELEGRAM_PROXY_URL=http://user:pass@proxy-host:3128` or `socks5://proxy-host:1080`.
 
 **DeepSeek blocked.** Same idea: a gateway that forwards to `https://api.deepseek.com`, then `DEEPSEEK_BASE_URL=https://relay2.example.com`. Or use the general proxy below.
@@ -287,6 +295,7 @@ Edit `.env` (`nano .env`) and set at least:
 | `ACME_EMAIL` | your email (Let's Encrypt notices) |
 | `DASHBOARD_COOKIE_SECURE` | `true` |
 | `DASHBOARD_DEMO` | `0` (no demo data in production) |
+| `PROXY_MODE`, `DASHBOARD_PORT` | `caddy` if ports 80/443 are free, otherwise `nginx` and a free local port (section 6b) |
 | `DAILY_TOKEN_BUDGET`, `MONTHLY_TOKEN_BUDGET`, `BUDGET_HARD_STOP` | optional limits; the bot alerts you at 80% and 100% |
 | Section 3 values | `TELEGRAM_API_BASE_URL`, `HTTPS_PROXY`, ... only if needed |
 
@@ -330,6 +339,24 @@ dig +short usage.example.com        # must print YOUR_SERVER_IP
 
 Caddy gets the Let's Encrypt certificate through port 80, so DNS must already point at the server and ports 80/443 must be reachable from the internet. If Let's Encrypt cannot reach the server (some networks block inbound traffic from abroad), put the dashboard behind a Cloudflare Tunnel or similar instead; the dashboard itself still requires its password.
 
+## 6b. If nginx (or Apache) already uses ports 80/443
+
+Caddy needs those ports for itself. If something else owns them (check with `sudo ss -tlnp | grep -E ':(80|443)\s'`), keep it and let it forward to the dashboard instead:
+
+1. In `.env` set `PROXY_MODE=nginx` and `DASHBOARD_PORT=8081` (any free local port; check `sudo ss -tlnp | grep 8081`). Do not start Caddy: `scripts/deploy.sh` skips it in this mode, and `DASHBOARD_COOKIE_SECURE=true` stays on because users reach the site over HTTPS.
+2. Add a virtual host (adjust `server_name` and the port in the file if needed) and get the certificate with certbot:
+
+```bash
+sudo cp deploy/nginx-dashboard.conf /etc/nginx/sites-available/assistant-dashboard
+sudo nano /etc/nginx/sites-available/assistant-dashboard
+sudo ln -s /etc/nginx/sites-available/assistant-dashboard /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d usage.example.com
+```
+
+The dashboard container publishes only `127.0.0.1:DASHBOARD_PORT`, so it is never reachable except through your nginx. The rest (sections 7 onward) is identical; ignore the Caddy lines.
+
 ## 7. First start
 
 ```bash
@@ -345,7 +372,7 @@ docker compose -f docker-compose.prod.yml logs --tail 30 bot # "Application star
 docker compose -f docker-compose.prod.yml logs --tail 30 migrate
 curl -s http://127.0.0.1:8000/health                          # {"status":"ok", database/telegram/llm all ok}
 curl -sI https://usage.example.com/login | head -3            # HTTP/2 200
-docker compose -f docker-compose.prod.yml logs proxy | grep -i "certificate obtained"
+docker compose -f docker-compose.prod.yml logs proxy | grep -i "certificate obtained"   # Caddy mode only
 ```
 
 Open `https://usage.example.com`, sign in with the dashboard password, and you should see the (empty) dashboard.

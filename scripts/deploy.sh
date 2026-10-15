@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 STATE_DIR=".deploy"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-240}"
-SERVICES_TO_CHECK=(db bot api dashboard proxy)
+SERVICES_TO_CHECK=(db bot api dashboard)
 mkdir -p "$STATE_DIR"
 
 log() { printf '[deploy] %s\n' "$*"; }
@@ -27,6 +27,17 @@ mkdir "$LOCK" 2>/dev/null || die "another deploy is running (if none is, remove 
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 [ -f .env ] || die ".env is missing (copy .env.example and fill it in; see docs/DEPLOY.md)"
+
+# PROXY_MODE=caddy (default): Caddy serves the dashboard on 80/443 with automatic HTTPS.
+# PROXY_MODE=nginx: your existing nginx already owns 80/443 and forwards to 127.0.0.1:${DASHBOARD_PORT}.
+PROXY_MODE="$( { grep -E '^PROXY_MODE=' .env || true; } | tail -1 | cut -d= -f2- | tr -d '\015"' | tr -d "'" )"
+PROXY_MODE="${PROXY_MODE:-caddy}"
+case "$PROXY_MODE" in
+  caddy) export COMPOSE_PROFILES=caddy; SERVICES_TO_CHECK+=(proxy) ;;
+  nginx) unset COMPOSE_PROFILES ;;
+  *) die "PROXY_MODE must be caddy or nginx (got: $PROXY_MODE)" ;;
+esac
+log "proxy mode: $PROXY_MODE"
 export APP_TAG   # set below; compose uses it to name the image per commit
 
 wait_healthy() {

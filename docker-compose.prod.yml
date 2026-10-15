@@ -125,6 +125,9 @@ services:
       MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}
       BUDGET_HARD_STOP: ${BUDGET_HARD_STOP:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # 127.0.0.1 only: used by an existing nginx (PROXY_MODE=nginx); Caddy reaches it on the Docker network.
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8081}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -139,13 +142,15 @@ services:
         limits: {cpus: "0.5", memory: 256M}
 
   # Reverse proxy with automatic HTTPS (Let's Encrypt) for DASHBOARD_HOST. Needs DNS to point here first.
+  # Only with PROXY_MODE=caddy (default). With PROXY_MODE=nginx your own nginx serves the dashboard instead.
   proxy:
+    profiles: ["caddy"]
     image: caddy:2.8.4-alpine
     restart: unless-stopped
     logging: *logging
     environment:
-      DASHBOARD_HOST: ${DASHBOARD_HOST:?set DASHBOARD_HOST in .env, e.g. usage.example.com}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      DASHBOARD_HOST: ${DASHBOARD_HOST:-usage.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
     ports:
       - "80:80"
       - "443:443"
