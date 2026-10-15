@@ -15,6 +15,16 @@ Follow the sections in order; each ends with a check so you know it worked befor
 
 **Read this first if the server is inside Iran.** Telegram, Google, Docker Hub and sometimes other hosts can be blocked or filtered there. Section 3 checks this *before* you install anything, and gives the fixes (proxy, API gateway, offline image loading). Do not skip it.
 
+## Fast path for this project (Ubuntu server, existing nginx, dashboard at `didrah.com/dashboard`)
+
+As root on the server (SSH from a network that is not a Cloudflare/foreign VPN: some Iranian hosts cut those connections):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rezashokrzad/persian-voice-assistant/main/scripts/server_setup.sh | bash
+```
+
+It creates the `deploy` user (keys from your GitHub account), installs Docker if missing, clones the repo, adds the `/dashboard` location to your `didrah.com` HTTPS block (backup + `nginx -t` first), and checks the ports. It does not touch the firewall, SSH settings or other sites. After it, upload `server.env` and `credentials.json` with `scp` and run `scripts/deploy.sh --no-pull` as the script prints. The manual sections below explain every step.
+
 ## 0. What you need before you start
 
 | Item | Where it comes from |
