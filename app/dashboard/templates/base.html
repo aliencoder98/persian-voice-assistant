@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}داشبورد{% endblock %} · دستیار صوتی</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% if request.session.get('auth') %}
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">📊 مصرف و کیفیت دستیار</span>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if nav == 'overview' }}">نمای کلی</a>
+      <a href="/logs" class="{{ 'active' if nav == 'logs' }}">لاگ‌ها</a>
+    </nav>
+    <form method="post" action="/logout"><button class="linkbtn" type="submit">خروج</button></form>
+  </div>
+</header>
+{% endif %}
+<main>{% block content %}{% endblock %}</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% set nav = 'overview' %}
+{% block title %}نمای کلی{% endblock %}
+{% block content %}
+<h1>نمای کلی</h1>
+
+{% if demo %}
+<div class="banner">⚠️ داده‌های نمایشی (دمو) در پایگاه داده وجود دارد تا نمودارها خالی نباشند. برای حذف: <span class="ltr">python -m app.dashboard.demo clear</span></div>
+{% endif %}
+
+<div class="range" aria-label="بازهٔ زمانی">
+  {% for r in ranges %}<a href="/?days={{ r }}" class="{{ 'active' if r == ov.days }}">{{ r|fa_num }} روز</a>{% endfor %}
+</div>
+
+<section class="grid budgets" aria-label="بودجه توکن">
+  {% for b in budgets %}
+  <div class="card">
+    <h2>بودجهٔ {{ b.label }} <span class="sub ltr">Token budget · {{ 'daily' if b.label == 'روزانه' else 'monthly' }}</span></h2>
+    {% if b.limit %}
+      {% set pct = b.percent %}
+      <div class="bar {{ 'bad' if pct >= 100 else 'warn' if pct >= 80 }}"><span data-pct="{{ [pct, 100]|min|round(1) }}"></span></div>
+      <div class="budget-meta"><span>{{ b.used|fa_num }} از {{ b.limit|fa_num }} توکن</span><span class="num">{{ (pct / 100)|fa_pct(0) }}</span></div>
+      <div class="sub">هشدار تلگرام در ۸۰٪ و ۱۰۰٪ · توقف خودکار: {{ 'فعال' if hard_stop else 'غیرفعال' }}</div>
+    {% else %}
+      <div class="muted">سقفی تعیین نشده است. مصرف تاکنون: <b class="num">{{ b.used|fa_num }}</b> توکن</div>
+      <div class="sub">برای تعیین سقف، <span class="ltr">{{ 'DAILY_TOKEN_BUDGET' if b.label == 'روزانه' else 'MONTHLY_TOKEN_BUDGET' }}</span> را در <span class="ltr">.env</span> تنظیم کنید.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+{% set k = ov.kpis %}
+<section class="grid kpis" aria-label="شاخص‌های کلیدی">
+  <div class="card kpi"><div class="label">توکن امروز</div><div class="metric">Tokens today</div><div class="value num">{{ k.tokens.today|fa_num }}</div></div>
+  <div class="card kpi"><div class="label">توکن ۷ روز</div><div class="metric">Tokens 7d</div><div class="value num">{{ k.tokens.d7|fa_num }}</div></div>
+  <div class="card kpi"><div class="label">توکن ۳۰ روز</div><div class="metric">Tokens 30d</div><div class="value num">{{ k.tokens.d30|fa_num }}</div></div>
+  <div class="card kpi"><div class="label">هزینه امروز / ۷ / ۳۰ روز</div><div class="metric">Cost (USD)</div><div class="value num">{{ k.cost.d30|fa_usd }} <small>۳۰ روز</small></div><div class="sub">{{ k.cost.today|fa_usd }} امروز · {{ k.cost.d7|fa_usd }} در ۷ روز</div></div>
+  <div class="card kpi"><div class="label">میانگین تأخیر</div><div class="metric">Avg latency</div><div class="value num">{{ k.latency_avg|fa_ms }}</div></div>
+  <div class="card kpi"><div class="label">تأخیر میانه</div><div class="metric">Latency P50</div><div class="value num">{{ k.latency_p50|fa_ms }}</div></div>
+  <div class="card kpi"><div class="label">تأخیر P95</div><div class="metric">Latency P95</div><div class="value num">{{ k.latency_p95|fa_ms }}</div></div>
+  <div class="card kpi"><div class="label">نرخ موفقیت</div><div class="metric">Success rate</div><div class="value num">{{ k.success_rate|fa_pct }}</div><div class="sub">از {{ k.runs|fa_num }} درخواست (۳۰ روز)</div></div>
+  <div class="card kpi"><div class="label">نرخ تأیید</div><div class="metric">Confirmation rate</div><div class="value num">{{ k.confirmation_rate|fa_pct }}</div><div class="sub">از {{ k.decided|fa_num }} تصمیم کاربر</div></div>
+  <div class="card kpi"><div class="label">نرخ ویرایش</div><div class="metric">Edit rate</div><div class="value num">{{ k.edit_rate|fa_pct }}</div><div class="sub">لغو: {{ k.cancel_rate|fa_pct }}</div></div>
+</section>
+
+<section class="grid charts" aria-label="نمودارها">
+  <div class="card"><h2>توکن در روز، به تفکیک مدل <span class="sub ltr">Tokens per day by model</span></h2><div class="chart-box"><canvas id="c-tokens-model"></canvas></div></div>
+  <div class="card"><h2>توکن در روز، به تفکیک هدف <span class="sub ltr">Tokens per day by purpose</span></h2><div class="chart-box"><canvas id="c-tokens-purpose"></canvas></div></div>
+  <div class="card"><h2>هزینه در روز (دلار) <span class="sub ltr">Cost per day</span></h2><div class="chart-box"><canvas id="c-cost"></canvas></div></div>
+  <div class="card"><h2>تأخیر در طول زمان <span class="sub ltr">Latency P50 / P95</span></h2><div class="chart-box"><canvas id="c-latency"></canvas></div></div>
+  <div class="card"><h2>نرخ موفقیت، تأیید و ویرایش <span class="sub ltr">Success / confirmation / edit rate</span></h2><div class="chart-box"><canvas id="c-rates"></canvas></div></div>
+  <div class="card"><h2>پرهزینه‌ترین درخواست‌ها <span class="sub ltr">Most expensive runs</span></h2><div class="chart-box"><canvas id="c-expensive"></canvas></div></div>
+</section>
+
+<section class="card" aria-label="کیفیت مدل‌ها">
+  <h2>کیفیت به تفکیک مدل <span class="sub ltr">Quality per model · last {{ ov.days }} days</span></h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th>مدل<small>Model</small></th><th>درخواست<small>Runs</small></th>
+      <th>موفقیت<small>Success rate</small></th><th>JSON معتبر<small>JSON-valid rate</small></th>
+      <th>موفقیت ابزار<small>Tool success</small></th><th>ویرایش<small>Edit rate</small></th>
+      <th>تأیید<small>Confirmation</small></th><th>میانگین گام<small>Avg steps</small></th>
+      <th>هزینه هر درخواست<small>Avg cost / run</small></th><th>تلاش مجدد<small>Avg retries</small></th>
+      <th>👍 سهم<small>Thumbs-up share</small></th>
+    </tr></thead>
+    <tbody>
+    {% for m in ov.quality %}
+      <tr>
+        <td class="ltr">{{ m.model }}</td><td class="num">{{ m.runs|fa_num }}</td>
+        <td class="num">{{ m.success_rate|fa_pct }}</td><td class="num">{{ m.json_valid_rate|fa_pct }}</td>
+        <td class="num">{{ m.tool_success_rate|fa_pct }}</td><td class="num">{{ m.edit_rate|fa_pct }}</td>
+        <td class="num">{{ m.confirmation_rate|fa_pct }}</td><td class="num">{{ m.avg_steps|fa_num(1) }}</td>
+        <td class="num">{{ m.avg_cost|fa_usd }}</td><td class="num">{{ m.avg_retries|fa_num(2) }}</td>
+        <td class="num">{{ m.thumbs_up_share|fa_pct }} <span class="sub">({{ m.feedback_count|fa_num }})</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11" class="muted">هنوز داده‌ای نیست.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card mt" aria-label="پرهزینه‌ترین درخواست‌ها">
+  <h2>پرهزینه‌ترین درخواست‌ها <span class="sub ltr">Top runs by cost</span></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>زمان</th><th>مدل</th><th>نوع</th><th>وضعیت</th><th>توکن</th><th>هزینه</th></tr></thead>
+    <tbody>
+    {% for r in ov.expensive %}
+      <tr>
+        <td><a href="/runs/{{ r.id }}" class="num">{{ r.id|fa_num }}</a></td><td>{{ r.created_at|fa_dt }}</td>
+        <td class="ltr">{{ r.model }}</td><td>{{ r.intent }}</td><td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+        <td class="num">{{ r.tokens|fa_num }}</td><td class="num">{{ r.cost|fa_usd }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<p class="footnote">
+  تعاریف: <b>نرخ موفقیت</b> = درخواست‌های بدون شکست ÷ همهٔ درخواست‌ها · <b>نرخ تأیید/ویرایش</b> = از میان درخواست‌هایی که کاربر دربارهٔ آن‌ها تصمیم گرفته (تأیید، ویرایش یا لغو) ·
+  <b>JSON معتبر</b> = درخواست‌هایی که هیچ فراخوانی نامعتبر یا ردشده نداشتند · <b>گام</b> = تعداد فراخوانی‌های موفق LLM در هر درخواست ·
+  «امروز» بر پایهٔ روز تقویمی <span class="ltr">Asia/Tehran</span> و «ماه» ماه شمسی است. هزینه بر اساس قیمت‌های تنظیم‌شده در <span class="ltr">LLM_PRICES_JSON</span> محاسبه می‌شود.
+</p>
+
+<script id="chart-data" type="application/json">{{ chart_data|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/chart.umd.js"></script>
+<script src="/static/app.js"></script>
+{% endblock %}

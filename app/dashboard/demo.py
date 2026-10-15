@@ -102,7 +102,7 @@ def _make_run(session: Session, rng: random.Random, user: User, at: dt.datetime)
         voice_id = voice.id
 
     run = AgentRun(
-        user_id=user.id, voice_message_id=voice_id, input_text=text, prompt_version="v1", model=model,
+        user_id=user.id, voice_message_id=voice_id, input_text=text, prompt_version="demo", model=model,
         intent=Intent.unknown, status=RunStatus.failed, created_at=at, updated_at=at,
     )  # fmt: skip
     session.add(run)
@@ -193,13 +193,17 @@ def _maybe_feedback(session: Session, rng: random.Random, run: AgentRun, user: U
 
 
 def has_demo(session: Session) -> bool:
-    return session.scalar(select(User.id).where(User.telegram_user_id == DEMO_TELEGRAM_ID)) is not None
+    """Demo runs are marked with prompt_version="demo" (the dashboard role cannot read users)."""
+    return session.scalar(select(AgentRun.id).where(AgentRun.prompt_version == "demo").limit(1)) is not None
 
 
 def has_real_usage(session: Session) -> bool:
-    demo = select(AgentRun.id).join(User, User.id == AgentRun.user_id).where(User.telegram_user_id == DEMO_TELEGRAM_ID)
+    demo_runs = select(AgentRun.id).where(AgentRun.prompt_version == "demo")
     return (
-        session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.run_id.not_in(demo) | LlmCall.run_id.is_(None))) or 0
+        session.scalar(
+            select(func.count()).select_from(LlmCall).where(LlmCall.run_id.not_in(demo_runs) | LlmCall.run_id.is_(None))
+        )
+        or 0
     ) > 0
 
 

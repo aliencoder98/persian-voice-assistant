@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set nav = 'logs' %}
+{% block title %}درخواست {{ d.run.id|fa_num }}{% endblock %}
+{% block content %}
+{% set r = d.run %}
+<p><a href="/logs">← بازگشت به لاگ‌ها</a></p>
+<h1>درخواست <span class="num">{{ r.id|fa_num }}</span> <span class="pill {{ r.status.value }}">{{ r.status.value }}</span></h1>
+
+<div class="stack">
+<section class="card">
+  <dl class="facts">
+    <div><dt>زمان</dt><dd class="num">{{ r.created_at|fa_dt }}</dd></div>
+    <div><dt>نوع (intent)</dt><dd>{{ r.intent.value }}</dd></div>
+    <div><dt>مدل</dt><dd class="ltr">{{ r.model or '—' }}</dd></div>
+    <div><dt>نسخهٔ پرامپت</dt><dd class="ltr">{{ r.prompt_version or '—' }}</dd></div>
+    <div><dt>توکن‌ها</dt><dd class="num">{{ d.tokens|fa_num }}</dd></div>
+    <div><dt>هزینه</dt><dd class="num">{{ d.cost|fa_usd }}</dd></div>
+    <div><dt>تأخیر کل</dt><dd class="num">{{ r.latency_ms|fa_ms }}</dd></div>
+    <div><dt>بازخورد</dt><dd>{% if d.feedback %}{{ '👍' if d.feedback[0] > 0 else '👎' }}{% else %}—{% endif %}</dd></div>
+  </dl>
+</section>
+
+{% if r.error %}<section class="card"><h2>خطا</h2><pre>{{ r.error }}</pre></section>{% endif %}
+
+<section class="card">
+  <h2>متن ورودی{% if d.voice %} <span class="sub">(پیام صوتی · اطمینان تشخیص گفتار {{ d.voice.stt_confidence|fa_num(2) }} · {{ d.voice.duration_s|fa_num }} ثانیه)</span>{% endif %}</h2>
+  <p>{{ (d.voice.transcript if d.voice and d.voice.transcript else r.input_text) or '—' }}</p>
+</section>
+
+<section class="card">
+  <h2>اکشن (JSON)</h2>
+  {% if r.action_json %}<pre>{{ pretty(r.action_json) }}</pre>{% else %}<span class="muted">—</span>{% endif %}
+</section>
+
+<section class="card">
+  <h2>فراخوانی‌های ابزار <span class="sub ltr">Tool calls</span></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ابزار</th><th>وضعیت</th><th>آرگومان‌ها</th><th>نتیجه</th></tr></thead>
+    <tbody>
+    {% for t in d.tool_calls %}
+      <tr><td class="ltr">{{ t.tool_name }}</td><td><span class="pill {{ 'executed' if t.status == 'ok' else 'failed' if t.status in ('error', 'invalid', 'rejected') else '' }}">{{ t.status }}</span></td>
+          <td><pre>{{ pretty(t.arguments_json) }}</pre></td><td><pre>{{ pretty(t.result_json) }}</pre></td></tr>
+    {% else %}<tr><td colspan="4" class="muted">—</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>فراخوانی‌های LLM <span class="sub ltr">LLM calls</span></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>هدف</th><th>مدل</th><th>ورودی</th><th>خروجی</th><th>کش</th><th>هزینه</th><th>تأخیر</th><th>تلاش مجدد</th><th>وضعیت</th></tr></thead>
+    <tbody>
+    {% for c in d.llm_calls %}
+      <tr><td class="ltr">{{ c.purpose.value }}</td><td class="ltr">{{ c.model }}</td><td class="num">{{ c.prompt_tokens|fa_num }}</td>
+          <td class="num">{{ c.completion_tokens|fa_num }}</td><td class="num">{{ c.cached_tokens|fa_num }}</td><td class="num">{{ c.cost_usd|fa_usd }}</td>
+          <td class="num">{{ c.latency_ms|fa_ms }}</td><td class="num">{{ c.retries|fa_num }}</td>
+          <td><span class="pill {{ 'executed' if c.status == 'ok' else 'failed' }}">{{ c.status }}</span>{% if c.error %} <span class="sub">{{ c.error }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="9" class="muted">—</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>رویدادهای ممیزی <span class="sub ltr">Audit events</span></h2>
+  <div class="table-wrap"><table>
+    <tbody>
+    {% for e in d.events %}<tr><td class="num">{{ e.created_at|fa_dt }}</td><td class="ltr">{{ e.event_type }}</td><td class="ltr">{{ e.actor }}</td></tr>
+    {% else %}<tr><td class="muted">—</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+</div>
+{% endblock %}

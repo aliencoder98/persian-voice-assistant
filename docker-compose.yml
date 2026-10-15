@@ -24,7 +24,14 @@ services:
   migrate:
     <<: *app
     build: .  # the single place the shared image is built
-    command: ["alembic", "upgrade", "head"]
+    # Migrations, then the dashboard's read-only DB role (skipped while DASHBOARD_DB_PASSWORD is empty).
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        if [ -n "$$DASHBOARD_DB_PASSWORD" ]; then python -m app.db.roles;
+        else echo "DASHBOARD_DB_PASSWORD is empty: dashboard role skipped"; fi
     depends_on:
       db:
         condition: service_healthy
@@ -67,6 +74,49 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # Demo data so the dashboard charts are not empty before real use (skipped once real usage exists).
+  demo-seed:
+    <<: *app
+    command:
+      - sh
+      - -c
+      - "if [ '${DASHBOARD_DEMO:-1}' = '1' ]; then python -m app.dashboard.demo seed --if-empty; fi"
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Read-only dashboard. No env_file on purpose: it never receives the bot token or any API key,
+  # and it connects with the read-only database role.
+  dashboard:
+    image: persian-assistant:dev
+    command: ["uvicorn", "app.dashboard.main:app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-assistant}
+      DASHBOARD_DB_USER: ${DASHBOARD_DB_USER:-dashboard_ro}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-}
+      DASHBOARD_SECRET_KEY: ${DASHBOARD_SECRET_KEY:-}
+      DASHBOARD_COOKIE_SECURE: ${DASHBOARD_COOKIE_SECURE:-false}
+      DAILY_TOKEN_BUDGET: ${DAILY_TOKEN_BUDGET:-0}
+      MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}
+      BUDGET_HARD_STOP: ${BUDGET_HARD_STOP:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

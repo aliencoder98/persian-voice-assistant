@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}ورود{% endblock %}
+{% block content %}
+<div class="login card">
+  <h1>ورود به داشبورد</h1>
+  {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" autocomplete="off">
+    <label for="password">رمز عبور</label>
+    <input id="password" name="password" type="password" required maxlength="200" autofocus autocomplete="current-password">
+    <p></p>
+    <button class="btn" type="submit">ورود</button>
+  </form>
+  <p class="sub center">فقط برای مالک</p>
+</div>
+{% endblock %}

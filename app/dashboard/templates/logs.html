@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% set nav = 'logs' %}
+{% block title %}لاگ‌ها{% endblock %}
+{% block content %}
+<h1>لاگ درخواست‌ها <span class="sub ltr">Run logs</span></h1>
+
+<form class="filters card" method="get" action="/logs">
+  <div><label for="date_from">از تاریخ</label><input id="date_from" type="date" name="date_from" value="{{ values.date_from }}"></div>
+  <div><label for="date_to">تا تاریخ</label><input id="date_to" type="date" name="date_to" value="{{ values.date_to }}"></div>
+  <div><label for="model">مدل</label>
+    <select id="model" name="model"><option value="">همه</option>
+    {% for m in options.models %}<option value="{{ m }}" {{ 'selected' if m == values.model }}>{{ m }}</option>{% endfor %}</select></div>
+  <div><label for="status">وضعیت</label>
+    <select id="status" name="status"><option value="">همه</option>
+    {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == values.status }}>{{ s }}</option>{% endfor %}</select></div>
+  <div><label for="intent">نوع</label>
+    <select id="intent" name="intent"><option value="">همه</option>
+    {% for i in ['schedule', 'email', 'unknown'] %}<option value="{{ i }}" {{ 'selected' if i == values.intent }}>{{ i }}</option>{% endfor %}</select></div>
+  <div><button class="btn" type="submit">اعمال فیلتر</button></div>
+  <div><a class="btn2" href="/logs.csv{{ '?' ~ qs if qs }}">⬇ خروجی CSV</a></div>
+</form>
+
+<div class="card">
+  <div class="sub">{{ total|fa_num }} مورد</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>زمان</th><th>نوع</th><th>وضعیت</th><th>مدل</th><th>توکن</th><th>تأخیر</th><th>هزینه</th><th>متن</th><th>خطا</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a class="num" href="/runs/{{ r.id }}">{{ r.id|fa_num }}</a></td>
+        <td class="num">{{ r.created_at|fa_dt }}</td>
+        <td>{{ r.intent }}</td>
+        <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+        <td class="ltr">{{ r.model or '—' }}</td>
+        <td class="num">{{ r.tokens|fa_num }}</td>
+        <td class="num">{{ r.latency_ms|fa_ms }}</td>
+        <td class="num">{{ r.cost|fa_usd }}</td>
+        <td class="trunc" title="{{ r.preview }}">{{ r.preview }}</td>
+        <td class="trunc" title="{{ r.error or '' }}">{{ r.error or '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="muted">موردی پیدا نشد.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+
+  <div class="pager">
+    {% if p > 1 %}<a class="btn2" href="/logs?{{ (qs ~ '&') if qs }}p={{ p - 1 }}">← قبلی</a>{% endif %}
+    <span class="muted">صفحهٔ {{ p|fa_num }} از {{ pages|fa_num }}</span>
+    {% if p < pages %}<a class="btn2" href="/logs?{{ (qs ~ '&') if qs }}p={{ p + 1 }}">بعدی →</a>{% endif %}
+  </div>
+</div>
+{% endblock %}
