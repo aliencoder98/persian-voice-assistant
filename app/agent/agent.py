@@ -15,6 +15,7 @@ from app.agent.llm import LLMError, LLMProvider
 from app.agent.prompt import PROMPT_VERSION, SYSTEM_PROMPT
 from app.agent.schemas import Action, Clarification, EmailAction, ScheduleAction
 from app.db.models import AgentRun, Intent, RunStatus, User
+from app.tools import impl as _tool_implementations  # noqa: F401  (registers the tools)
 from app.tools.registry import (
     ToolContext,
     agent_tool_schemas,

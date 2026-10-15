@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.schemas import EmailAction, ScheduleAction
 from app.db.models import AgentRun, AuditEvent, CalendarEvent, Email, Intent, RunStatus, User
+from app.tools import impl as _tool_implementations  # noqa: F401  (registers the tools)
 from app.tools.registry import ToolContext, run_tool, tehran_now
 from app.util.persian import jalali_long_fa, to_fa_digits
 
