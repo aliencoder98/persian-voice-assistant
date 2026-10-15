@@ -21,9 +21,10 @@ log() { printf '[deploy] %s\n' "$*"; }
 die() { printf '[deploy] ERROR: %s\n' "$*" >&2; exit 1; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
-# one deploy at a time
-exec 9>"$STATE_DIR/lock"
-flock -n 9 || die "another deploy is running"
+# one deploy at a time (mkdir is atomic and works everywhere; a crash can leave a stale lock)
+LOCK="$STATE_DIR/lock.d"
+mkdir "$LOCK" 2>/dev/null || die "another deploy is running (if none is, remove the stale lock: rmdir $LOCK)"
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 [ -f .env ] || die ".env is missing (copy .env.example and fill it in; see docs/DEPLOY.md)"
 export APP_TAG   # set below; compose uses it to name the image per commit
