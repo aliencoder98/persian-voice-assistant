@@ -219,6 +219,14 @@ Vosk model unreachable only: download `vosk-model-small-fa-0.42.zip` elsewhere, 
 
 ## 4. Get the code onto the server
 
+**Shortcut (this project's public repository).** The code is public at `https://github.com/rezashokrzad/persian-voice-assistant` and contains no secrets, so the server can clone it without any key:
+
+```bash
+git clone https://github.com/rezashokrzad/persian-voice-assistant.git ~/assistant && cd ~/assistant
+```
+
+Later updates are `scripts/deploy.sh` (it runs `git pull`). Use 4.1 or 4.2 below only for a private fork.
+
 ### 4.1 Through a private Git remote (recommended)
 
 On your computer:
@@ -263,6 +271,17 @@ For every later update, make a new bundle on your computer, `scp` it to `~/assis
 Check: `cd ~/assistant && git log --oneline | head -3` and `ls scripts docs`.
 
 ## 5. Configure `.env` and secrets (secrets never go through git)
+
+**Shortcut: build the server `.env` on your computer.** `python scripts/make_server_env.py` (run in the project folder) turns your local `.env` into `secrets/server.env`: your tokens and keys are carried over, production settings are applied, and new random secrets are generated for the server (database password, dashboard password and session key, admin key; the dashboard password goes to `secrets/server_dashboard_password.txt`). Open the file, replace the two `CHANGE_ME` values (`DASHBOARD_HOST`, `TELEGRAM_API_BASE_URL`), then upload it:
+
+```bash
+scp secrets/server.env deploy@YOUR_SERVER_IP:/home/deploy/assistant/.env
+ssh deploy@YOUR_SERVER_IP "chmod 600 ~/assistant/.env"
+```
+
+`scripts/deploy.sh` refuses to run while a `CHANGE_ME` is left in `.env`. If you use this shortcut, skip the manual table below and go to the dashboard-password note: the hash is already in the file, so nothing more is needed there either.
+
+The manual way, if you prefer it:
 
 ```bash
 cd ~/assistant

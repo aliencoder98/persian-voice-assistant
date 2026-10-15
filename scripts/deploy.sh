@@ -28,6 +28,11 @@ trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 [ -f .env ] || die ".env is missing (copy .env.example and fill it in; see docs/DEPLOY.md)"
 
+if grep -q 'CHANGE_ME' .env; then
+  die ".env still contains CHANGE_ME placeholders: $(grep -o '^[A-Z_]*=CHANGE_ME[^ ]*' .env | cut -d= -f1 | tr '
+' ' ')"
+fi
+
 # PROXY_MODE=caddy (default): Caddy serves the dashboard on 80/443 with automatic HTTPS.
 # PROXY_MODE=nginx: your existing nginx already owns 80/443 and forwards to 127.0.0.1:${DASHBOARD_PORT}.
 PROXY_MODE="$( { grep -E '^PROXY_MODE=' .env || true; } | tail -1 | cut -d= -f2- | tr -d '\015"' | tr -d "'" )"
