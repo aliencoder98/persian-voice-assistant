@@ -14,8 +14,12 @@ RUN useradd --create-home --uid 1000 app \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install -r requirements.txt -r requirements-dev.txt
+
+# Vosk Persian model, baked into the image (~50 MB zip). Kept above COPY . . so it stays cached.
+ARG VOSK_MODEL_URL=https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip
+RUN python -c "import io,urllib.request,zipfile; z=zipfile.ZipFile(io.BytesIO(urllib.request.urlopen('${VOSK_MODEL_URL}', timeout=300).read())); z.extractall('/opt/vosk')"     && mv /opt/vosk/* /opt/vosk/model     && chown -R app:app /opt/vosk
 
 COPY --chown=app:app . .
 

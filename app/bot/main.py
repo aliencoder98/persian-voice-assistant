@@ -18,6 +18,7 @@ from app.bot import messages
 from app.config import get_settings
 from app.db.models import AuditEvent, User, VoiceMessage
 from app.db.session import SessionLocal
+from app.stt.vosk_stt import SttError, transcribe_ogg
 
 log = logging.getLogger("bot")
 
@@ -81,6 +82,15 @@ def _store_voice(tg_user, file_id: str, duration: int | None, path: str) -> int:
         return voice.id
 
 
+def _finish_voice(voice_id: int, text: str, confidence: float) -> None:
+    with SessionLocal() as session:
+        row = session.get(VoiceMessage, voice_id)
+        row.transcript = text
+        row.stt_confidence = confidence
+        row.audio_path = None  # audio is deleted right after transcription (SPEC)
+        session.commit()
+
+
 async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     tg_voice = msg.voice
@@ -88,14 +98,27 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     audio_dir.mkdir(parents=True, exist_ok=True)
     path = audio_dir / f"{tg_voice.file_unique_id}.ogg"
 
-    tg_file = await context.bot.get_file(tg_voice.file_id)
-    await tg_file.download_to_drive(path)
+    try:
+        tg_file = await context.bot.get_file(tg_voice.file_id)
+        await tg_file.download_to_drive(path)
+        voice_id = await asyncio.to_thread(
+            _store_voice, update.effective_user, tg_voice.file_id, tg_voice.duration, str(path)
+        )
+        try:
+            result = await asyncio.to_thread(transcribe_ogg, path)
+        except SttError:
+            log.exception("STT failed for voice %s", voice_id)
+            await msg.reply_text(messages.STT_FAILED)
+            return
+    finally:
+        path.unlink(missing_ok=True)
 
-    voice_id = await asyncio.to_thread(
-        _store_voice, update.effective_user, tg_voice.file_id, tg_voice.duration, str(path)
-    )
-    log.info("Stored voice message %s", voice_id)
-    await msg.reply_text(messages.VOICE_SAVED.format(duration=tg_voice.duration))
+    await asyncio.to_thread(_finish_voice, voice_id, result.text, result.confidence)
+    log.info("Voice %s transcribed (confidence %.2f)", voice_id, result.confidence)
+    if not result.usable:
+        await msg.reply_text(messages.REPEAT)
+        return
+    await msg.reply_text(messages.TRANSCRIPT.format(text=result.text))
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

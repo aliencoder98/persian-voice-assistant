@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     audio_dir: str = "/data/audio"
+
+    stt_model_path: str = "/opt/vosk/model"
+    stt_min_confidence: float = 0.5
+
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_timeout_s: float = 30.0
+    deepseek_max_retries: int = 3
+
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
+    google_calendar_id: str = "primary"
+
     log_level: str = "INFO"
 
     @property
