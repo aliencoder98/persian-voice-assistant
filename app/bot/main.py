@@ -2,11 +2,12 @@ import asyncio
 import logging
 from pathlib import Path
 
-from sqlalchemy import select
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     ApplicationHandlerStop,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -14,9 +15,12 @@ from telegram.ext import (
     filters,
 )
 
+from app.agent.executor import cancel_run, confirm_run
 from app.bot import messages
+from app.bot.pipeline import Reply, analyse, get_or_create_user
+from app.bot.preview import confirmation_keyboard, format_preview
 from app.config import get_settings
-from app.db.models import AuditEvent, User, VoiceMessage
+from app.db.models import AuditEvent, VoiceMessage
 from app.db.session import SessionLocal
 from app.stt.vosk_stt import SttError, transcribe_ogg
 
@@ -42,27 +46,59 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(messages.HELP)
 
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(messages.ECHO.format(text=update.message.text))
+# ---------- agent replies ----------
 
 
-def _get_or_create_user(session, tg_user) -> User:
-    settings = get_settings()
-    user = session.scalar(select(User).where(User.telegram_user_id == tg_user.id))
-    if user is None:
-        user = User(
-            telegram_user_id=tg_user.id,
-            name=tg_user.full_name,
-            timezone=settings.default_timezone,
-        )
-        session.add(user)
-        session.flush()
-    return user
+async def respond(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, voice_id: int | None = None):
+    """Run the agent on `text` and send either a question or a confirmable preview."""
+    msg = update.effective_message
+    await context.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+    editing = context.user_data.pop("editing_run", None)
+    reply: Reply = await asyncio.to_thread(
+        analyse, update.effective_user, text, voice_message_id=voice_id, editing_run_id=editing
+    )
+    if reply.kind == "clarify":
+        await msg.reply_text(reply.text)
+    elif reply.kind == "failed":
+        await msg.reply_text(messages.AGENT_FAILED)
+    else:
+        await msg.reply_text(format_preview(reply.action), reply_markup=confirmation_keyboard(reply.run_id))
+
+
+async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await respond(update, context, update.message.text)
+
+
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    action, _, raw_id = query.data.partition(":")
+    run_id = int(raw_id)
+    await query.edit_message_reply_markup(reply_markup=None)  # buttons vanish on the first tap
+
+    if action == "ed":
+        context.user_data["editing_run"] = run_id
+        await query.message.reply_text(messages.EDIT_PROMPT)
+        return
+
+    def work():
+        with SessionLocal() as session:
+            user = get_or_create_user(session, update.effective_user)
+            fn = confirm_run if action == "ok" else cancel_run
+            return fn(session, user, run_id)
+
+    if action == "ok":
+        await query.message.reply_text(messages.CONFIRMING)
+    result = await asyncio.to_thread(work)
+    await query.message.reply_text(result.message)
+
+
+# ---------- voice ----------
 
 
 def _store_voice(tg_user, file_id: str, duration: int | None, path: str) -> int:
     with SessionLocal() as session:
-        user = _get_or_create_user(session, tg_user)
+        user = get_or_create_user(session, tg_user)
         voice = VoiceMessage(
             user_id=user.id,
             telegram_file_id=file_id,
@@ -119,6 +155,7 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_text(messages.REPEAT)
         return
     await msg.reply_text(messages.TRANSCRIPT.format(text=result.text))
+    await respond(update, context, result.text, voice_id)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -138,8 +175,9 @@ def build_application() -> Application:
     app.add_handler(TypeHandler(Update, guard), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|ed):\d+$"))
     app.add_handler(MessageHandler(filters.VOICE, voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
     app.add_error_handler(on_error)
     return app
 
