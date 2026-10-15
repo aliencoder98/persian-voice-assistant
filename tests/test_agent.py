@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from app.agent.agent import MAX_STEPS, process_message
 from app.agent.context import AgentContext
+from app.agent.prompt import PROMPT_VERSION
 from app.db.models import AgentRun, RunStatus, ToolCall
 from app.tools import impl
 from tests.conftest import FIXED_NOW
@@ -36,7 +37,7 @@ def test_sample_transcript(session, user, sample):
     # the run is recorded with tokens, latency, model and prompt version
     row = session.get(AgentRun, agent_run.id)
     assert row.tokens == 230 * outcome.steps and row.latency_ms is not None
-    assert row.model == "scripted" and row.prompt_version == "v1"
+    assert row.model == "scripted" and row.prompt_version == PROMPT_VERSION
     assert row.input_text == sample.transcript
     names = [t.tool_name for t in session.scalars(select(ToolCall).where(ToolCall.run_id == row.id))]
     assert names, "tool calls must be logged"
