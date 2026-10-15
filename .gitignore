@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+secrets/
+credentials*.json
+client_secret*.json
+
 # Python
 __pycache__/
 *.py[cod]

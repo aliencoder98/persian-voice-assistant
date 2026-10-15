@@ -35,6 +35,7 @@ services:
     restart: unless-stopped
     volumes:
       - audio:/data/audio
+      - ./secrets:/app/secrets:ro  # Google OAuth client file, never baked into the image
     depends_on:
       migrate:
         condition: service_completed_successfully

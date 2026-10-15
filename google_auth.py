@@ -43,6 +43,12 @@ def load_env() -> dict[str, str]:
 def main() -> int:
     env = load_env()
     client_id, client_secret = env.get("GOOGLE_CLIENT_ID"), env.get("GOOGLE_CLIENT_SECRET")
+    creds_file = Path(__file__).with_name("secrets") / "credentials.json"
+    if (not client_id or not client_secret) and creds_file.is_file():
+        import json
+
+        installed = json.loads(creds_file.read_text(encoding="utf-8"))["installed"]
+        client_id, client_secret = installed["client_id"], installed["client_secret"]
     if not client_id or not client_secret:
         print("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET first (see README).", file=sys.stderr)
         return 1

@@ -1,6 +1,9 @@
 .git
 .env
 .env.*
+secrets
+credentials*.json
+client_secret*.json
 !.env.example
 __pycache__
 *.pyc

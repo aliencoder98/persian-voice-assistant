@@ -1,5 +1,8 @@
+import json
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -40,6 +43,22 @@ class Settings(BaseSettings):
     google_calendar_id: str = "primary"
 
     log_level: str = "INFO"
+
+    # Google "Desktop app" client file (downloaded from Cloud Console); used when the
+    # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET variables are empty.
+    google_credentials_file: str = "secrets/credentials.json"
+
+    @model_validator(mode="after")
+    def _google_client_from_file(self) -> "Settings":
+        path = Path(self.google_credentials_file)
+        if (not self.google_client_id or not self.google_client_secret) and path.is_file():
+            try:
+                client = json.loads(path.read_text(encoding="utf-8"))["installed"]
+                self.google_client_id = self.google_client_id or client["client_id"]
+                self.google_client_secret = self.google_client_secret or client["client_secret"]
+            except (ValueError, KeyError):
+                pass  # malformed file: Google calls will report missing credentials
+        return self
 
     @property
     def allowed_ids(self) -> frozenset[int]:
