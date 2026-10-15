@@ -40,3 +40,6 @@ models/*.zip
 backups/
 scripts/backup.conf
 .deploy/
+
+# Local transfer artifacts
+*.bundle
