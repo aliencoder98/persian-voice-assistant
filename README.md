@@ -20,14 +20,19 @@ cp .env.example .env        # fill in the values (see below)
 docker compose up --build
 ```
 
-| Service   | What it does                                                        |
-|-----------|---------------------------------------------------------------------|
-| `db`      | PostgreSQL 16, named volume, healthcheck                            |
-| `migrate` | One-shot: `alembic upgrade head`, then exits                        |
-| `bot`     | Telegram worker (long polling): Vosk STT, agent, confirmation       |
-| `api`     | FastAPI on `127.0.0.1:${API_PORT:-8000}` only (`/health`)           |
+| Service     | What it does                                                                         |
+|-------------|--------------------------------------------------------------------------------------|
+| `db`        | PostgreSQL 16, named volume, healthcheck                                             |
+| `migrate`   | One-shot: `alembic upgrade head`, then the dashboard's read-only DB role             |
+| `bot`       | Telegram worker (long polling): Vosk STT, agent, confirmation                        |
+| `api`       | FastAPI on `127.0.0.1:${API_PORT:-8000}` only: `/health` and the admin endpoints     |
+| `mcp`       | MCP server (streamable HTTP) on `127.0.0.1:${MCP_PORT:-8765}`                        |
+| `dashboard` | Usage and quality dashboard on `127.0.0.1:${DASHBOARD_PORT:-8080}` (password login)  |
+| `demo-seed` | One-shot: 30 days of demo data for the dashboard (skipped once real usage exists)    |
 
-The Vosk Persian model (`vosk-model-small-fa-0.42`) is downloaded into the image at build time.
+The Vosk Persian model (`vosk-model-small-fa-0.42`) is downloaded into the image at build time. If a host port is already taken on your machine, set `API_PORT`, `MCP_PORT` or `DASHBOARD_PORT` in `.env`.
+
+Production (HTTPS dashboard behind Caddy, limits, log rotation, backups): see **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ## Setup checklist
 
@@ -41,7 +46,7 @@ The Vosk Persian model (`vosk-model-small-fa-0.42`) is downloaded into the image
 
 1. In [Google Cloud Console](https://console.cloud.google.com/) create or pick a project and **enable the Google Calendar API**.
 2. *APIs & Services → OAuth consent screen*: choose **External**, add yourself under **Test users**. (In *Testing* mode refresh tokens expire after 7 days; click *Publish app* to make them long-lived. A personal app that is only used by you does not need verification.)
-3. *APIs & Services → Credentials → Create credentials → OAuth client ID → Application type **Desktop app***. Copy the client ID and secret into `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+3. *APIs & Services → Credentials → Create credentials → OAuth client ID → Application type **Desktop app***. Download the JSON and save it as `secrets/credentials.json` (the folder is git-ignored and mounted read-only into the bot). The client id and secret are read from it; alternatively set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
 4. On your own computer (it opens a browser, so not inside Docker):
    ```bash
    pip install httpx
@@ -105,6 +110,33 @@ The same tools the agent uses, as an [MCP](https://modelcontextprotocol.io) serv
 
 The database container must be running (`docker compose up -d db`). The HTTP endpoint has no authentication of its own; it is only reachable from your machine, so do not publish that port.
 
+## Dashboard (usage and quality)
+
+`docker compose up` serves it on `http://127.0.0.1:8080` (`DASHBOARD_PORT`). It needs three values in `.env`: `DASHBOARD_DB_PASSWORD` (any strong password; the read-only database role is created from it at start-up), `DASHBOARD_SECRET_KEY` (signs the session cookie) and `DASHBOARD_PASSWORD_HASH`:
+
+```bash
+docker compose run --rm bot python -m app.dashboard.hashpw      # prompts for a password, prints the line for .env
+python -c "import secrets;print(secrets.token_urlsafe(48))"      # for DASHBOARD_SECRET_KEY
+```
+
+Without all three the dashboard answers `503` to everything except `/healthz`. What it shows: tokens (today, 7 and 30 days), cost, latency average/P50/P95, success, confirmation and edit rates; charts of tokens and cost per day by model and purpose, latency, rates and the most expensive runs; a quality table per model; a filterable log table with CSV export; a run page with transcript, action JSON, tool calls, LLM calls, audit events. Labels are Persian with the English metric names, numbers use Persian digits, dates are Jalali.
+
+- **Every LLM call is recorded** in `llm_calls` by the provider itself (model, purpose, prompt/completion/cached tokens, cost from the per-model prices in `LLM_PRICES_JSON`, latency, retries, status). The bot's reply carries 👍/👎 buttons; the votes go to `run_feedback`.
+- **Budgets**: `DAILY_TOKEN_BUDGET` and `MONTHLY_TOKEN_BUDGET` (prompt+completion tokens; "today" is the Tehran day, the month is the Jalali month). The dashboard shows progress bars; the bot sends you a Telegram message at 80% and at 100% (once per period). With `BUDGET_HARD_STOP=true` the bot refuses new requests at 100%. Budgets are configured in `.env` because the dashboard itself is read-only.
+- **Demo data**: until real usage exists the dashboard is filled with 30 days of demo data (clearly marked). Remove it with `docker compose run --rm bot python -m app.dashboard.demo clear`, and set `DASHBOARD_DEMO=0` so it is not created again.
+- **Security**: sign-in required for everything; PBKDF2 password hash; signed `HttpOnly`, `SameSite=Strict` cookie (`Secure` behind HTTPS); five failed logins lock an IP out for five minutes; strict CSP without inline scripts. The dashboard connects with a **read-only database role** that cannot read audio paths, Telegram file ids, contacts, emails or memory, and its container never receives the bot token or API keys.
+- **Definitions**: success rate = runs not in `failed`; confirmation / edit rate = share of runs the owner decided on (confirmed, edited, cancelled); JSON-valid = runs without an invalid or rejected tool call; steps = successful LLM calls per run; "today" = Asia/Tehran calendar day.
+
+## Evaluation
+
+`app/evals/dataset.jsonl` holds 30 Persian transcripts with their expected results (16 schedule, 8 email, 6 that must end in a clarifying question, including a missing time, an unknown contact and an injection attempt). Run it against the real model:
+
+```bash
+docker compose run --rm bot python -m app.evals.run --out docs/EVAL.md
+```
+
+Latest result (prompt v3): intent 100%, date 100%, time 100% on this set. The first, untuned prompt scored 96.7% / 87.5% / 93.8%; the history and the caveat that the set was used for tuning are in [docs/EVAL.md](docs/EVAL.md).
+
 ## Tests
 
 ```bash
@@ -112,7 +144,7 @@ docker compose run --rm bot python -m pytest             # offline: scripted mod
 docker compose run --rm -e LIVE_LLM=1 bot python -m pytest tests/test_agent_live.py -s   # real DeepSeek
 ```
 
-The offline suite replays ten Persian sample transcripts (`tests/samples.py`: both intents, a missing time, an unknown contact, a hallucinated address, an injection attempt, out of scope) plus provider, tool, confirmation and memory tests. It uses a throwaway `<POSTGRES_DB>_test` database next to the real one.
+The offline suite (about 190 tests) replays ten Persian sample transcripts (`tests/samples.py`: both intents, a missing time, an unknown contact, a hallucinated address, an injection attempt, out of scope) plus provider, tool, confirmation and memory tests. It uses a throwaway `<POSTGRES_DB>_test` database next to the real one.
 
 ## Other commands
 
@@ -130,8 +162,26 @@ app/bot      Telegram handlers, previews, pipeline
 app/stt      Vosk + ffmpeg
 app/agent    prompt, schemas, provider, loop, executor, memory
 app/tools    tool registry and implementations, Google Calendar, Resend
-app/api      FastAPI app          app/db   models, session, seed
+app/api      FastAPI app          app/db   models, session, seed, read-only role
+app/mcp      MCP server           app/dashboard   dashboard (queries, demo data, UI)
+app/evals    evaluation set and runner            app/budget.py   token budgets and alerts
 app/util     Persian text and Jalali calendar
 migrations/  Alembic              tests/   pytest
 google_auth.py  one-time OAuth helper (run on your computer)
+docker-compose.prod.yml  deploy/Caddyfile  scripts/{deploy,backup,restore,check_outbound}.sh  docs/DEPLOY.md
 ```
+
+## Status and known limits (v1.0.0)
+
+Done: Telegram bot (allowlist, rate limit, 60 s voice cap), Vosk speech-to-text, DeepSeek agent with validated tools and a confirmation step, Google Calendar and Resend execution with idempotency, memory, admin API, MCP server, usage/quality dashboard with budgets, evaluation set, production compose with HTTPS, backups, deploy and rollback scripts.
+
+Limits you should know about:
+
+- **Speech recognition is the weakest link.** The small Vosk Persian model often garbles speech yet reports a high confidence, so the "please repeat" check does not catch it. The agent evaluation measures text understanding only.
+- The 100% evaluation score is a development-set score (the prompt was tuned on the same 30 transcripts); expect lower numbers on new phrasing and on real speech.
+- One bot process: rate-limit counters and a pending "Edit" live in memory and are lost on restart.
+- Single server, no high availability; backups are the safety net.
+- The MCP HTTP endpoint has no authentication of its own (localhost only).
+- DeepSeek prices in `LLM_PRICES_JSON` are list prices at the time of writing; check them against your plan. Model names change: `DEEPSEEK_MODEL` defaults to `deepseek-chat`, which DeepSeek may retire in favour of newer names.
+- Not exercised end to end in this repository's checks: a real voice message creating a real calendar event (needs your Google token), the real Telegram budget alert, and the deployment on your server.
+
