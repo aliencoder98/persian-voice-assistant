@@ -28,6 +28,7 @@ class Intent(str, enum.Enum):
 
 class RunStatus(str, enum.Enum):
     pending_confirmation = "pending_confirmation"
+    needs_clarification = "needs_clarification"  # agent asked the user a question instead
     confirmed = "confirmed"
     executed = "executed"
     rejected = "rejected"
@@ -90,9 +91,13 @@ class AgentRun(TimestampMixin, Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     voice_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("voice_messages.id", ondelete="SET NULL"), index=True
     )
+    # What the agent was given: the transcript, or the typed text (the bot also accepts text).
+    input_text: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[str | None] = mapped_column(String(20))
     intent: Mapped[Intent] = mapped_column(_enum(Intent, "intent"), default=Intent.unknown)
     action_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     status: Mapped[RunStatus] = mapped_column(

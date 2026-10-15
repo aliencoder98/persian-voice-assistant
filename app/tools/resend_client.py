@@ -9,7 +9,14 @@ class EmailError(RuntimeError):
     pass
 
 
-def send_email(to: str, subject: str, body: str, *, html: str | None = None) -> str:
+def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    html: str | None = None,
+    idempotency_key: str | None = None,
+) -> str:
     """Send one email via Resend and return the provider message id."""
     settings = get_settings()
     if not settings.resend_api_key or not settings.email_from:
@@ -24,11 +31,15 @@ def send_email(to: str, subject: str, body: str, *, html: str | None = None) -> 
     if html:
         payload["html"] = html
 
+    headers = {"Authorization": f"Bearer {settings.resend_api_key}"}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key  # Resend dedupes repeats for 24h
+
     try:
         response = httpx.post(
             RESEND_URL,
             json=payload,
-            headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+            headers=headers,
             timeout=20,
         )
     except httpx.HTTPError as exc:
